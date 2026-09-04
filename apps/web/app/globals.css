@@ -1,0 +1,23 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Scaffold-only base styles. The full design-system tokens (light + dark,
+ * matching the mockup canvas) land with the UI tasks (T14+).
+ */
+:root {
+  color-scheme: light dark;
+}
+
+body {
+  background: #fbfaf9;
+  color: #1c1a17;
+}
+
+@media (prefers-color-scheme: dark) {
+  body {
+    background: #1b1a19;
+    color: #ececea;
+  }
+}
