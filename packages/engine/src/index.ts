@@ -6,17 +6,33 @@ export {
   grossUpDividends,
   residentIncomeTax,
 } from "./core";
+export {
+  assess,
+  computeIncomeTests,
+  computeMedicareLevy,
+  computeMedicareLevySurcharge,
+  computeLowIncomeTaxOffset,
+  computeBeneficiaryTaxOffset,
+  reconcilePrivateHealthRebate,
+  computeStudyLoanRepayment,
+} from "./full";
 export { buildHarnessReport } from "./harness";
 
 export type {
   ResidencyStatus,
   DividendIncome,
+  EnginePrivateHealthInput,
   EngineIncomeInput,
   EngineDeductionsInput,
   EngineContextInput,
   EngineInput,
   AssessableIncomeBreakdown,
   CoreAssessment,
+  IncomeTestResults,
+  PhiRebatePeriodEntitlement,
+  PrivateHealthRebateReconciliation,
+  AssessmentOutcome,
+  FullAssessment,
   EngineResult,
 } from "./types";
 
