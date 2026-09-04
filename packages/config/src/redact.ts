@@ -18,31 +18,69 @@ export function secretValues(config: AppConfig): string[] {
   return candidates.filter((v): v is string => typeof v === "string" && v.length > 0);
 }
 
+function isPlainObject(value: object): boolean {
+  const proto: unknown = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
 /**
- * Returns a deep copy of `value` with every occurrence of any of `secrets`
- * replaced by `[redacted]`. Use before logging anything that might embed a
- * secret (PRD FR-17 / "secret hygiene").
+ * Returns a copy of `value` safe to log: every occurrence of any of `secrets` in
+ * a string is replaced by `[redacted]` (PRD FR-17 / "secret hygiene").
+ *
+ * Only plain objects and arrays are rebuilt and recursed into. Other object
+ * types are collapsed to a short marker rather than corrupted into `{}` — a
+ * `Buffer` becomes `"[Buffer]"`, an `Error` becomes `"[Name: <scrubbed
+ * message>]"`, a `Date` is passed through, a `Map`/`Set` becomes `"[Map(n)]"` /
+ * `"[Set(n)]"`, any other class instance becomes `"[ClassName]"`. A circular
+ * reference renders as `"[Circular]"`. The return type is `unknown` because the
+ * shape genuinely changes.
  */
-export function redact<T>(value: T, secrets: readonly string[]): T {
+export function redact(value: unknown, secrets: readonly string[]): unknown {
   const needles = secrets.filter((s) => s.length > 0);
   if (needles.length === 0) return value;
 
-  const scrub = (input: unknown): unknown => {
-    if (typeof input === "string") {
-      let out = input;
-      for (const needle of needles) {
-        if (out.includes(needle)) out = out.split(needle).join(REDACTED);
-      }
-      return out;
+  const scrubString = (input: string): string => {
+    let out = input;
+    for (const needle of needles) {
+      if (out.includes(needle)) out = out.split(needle).join(REDACTED);
     }
-    if (Array.isArray(input)) return input.map(scrub);
-    if (input !== null && typeof input === "object") {
-      return Object.fromEntries(Object.entries(input).map(([k, v]) => [k, scrub(v)]));
-    }
-    return input;
+    return out;
   };
 
-  return scrub(value) as T;
+  const seen = new WeakSet<object>();
+
+  const scrub = (input: unknown): unknown => {
+    if (typeof input === "string") return scrubString(input);
+    if (typeof input === "function") return "[Function]";
+    if (typeof input !== "object" || input === null) return input;
+
+    if (seen.has(input)) return "[Circular]";
+
+    if (Buffer.isBuffer(input)) return "[Buffer]";
+    if (input instanceof Error) return `[${input.name}: ${scrubString(input.message)}]`;
+    if (input instanceof Date) return input;
+    if (input instanceof Map) return `[Map(${input.size})]`;
+    if (input instanceof Set) return `[Set(${input.size})]`;
+
+    if (Array.isArray(input)) {
+      seen.add(input);
+      const out = input.map(scrub);
+      seen.delete(input);
+      return out;
+    }
+
+    if (isPlainObject(input)) {
+      seen.add(input);
+      const out = Object.fromEntries(Object.entries(input).map(([key, val]) => [key, scrub(val)]));
+      seen.delete(input);
+      return out;
+    }
+
+    const name = (input.constructor as { name?: string } | undefined)?.name ?? "Object";
+    return `[${name}]`;
+  };
+
+  return scrub(value);
 }
 
 /**

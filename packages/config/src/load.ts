@@ -23,23 +23,36 @@ function trimmedOrUndefined(value: string | undefined): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
-/** Decodes and validates the AES-256 key. Accepts hex (64 chars) or base64 (44 chars). */
+const HEX_ONLY = /^[0-9a-fA-F]+$/;
+const BASE64_ANY = /^[A-Za-z0-9+/\-_]+={0,2}$/;
+
+/**
+ * Decodes and validates the AES-256 key. Accepts a 64-character hex string, or a
+ * base64 / base64url string, whichever decodes to exactly 32 bytes. The encoding
+ * is classified by the decoded byte length, not by which alphabet the string
+ * happens to fit — a 44-character hex-only string is a truncated key, not proof
+ * of base64.
+ */
 function decodeEncryptionKey(raw: string): Buffer {
-  if (/^[0-9a-fA-F]+$/.test(raw)) {
-    if (raw.length === AES_256_KEY_BYTES * 2) return Buffer.from(raw, "hex");
-    throw new ConfigError(
-      `RETURN_ENCRYPTION_KEY looks hex-encoded but is ${raw.length} characters — ` +
-        "a 32-byte AES-256 key is 64 hex characters (try `openssl rand -hex 32`)",
-    );
+  const attempts: string[] = [];
+
+  if (HEX_ONLY.test(raw) && raw.length % 2 === 0) {
+    const hex = Buffer.from(raw, "hex");
+    if (hex.length === AES_256_KEY_BYTES) return hex;
+    attempts.push(`${hex.length} bytes as hex`);
   }
 
-  const decoded = Buffer.from(raw, "base64");
-  const roundTrips = decoded.toString("base64").replace(/=+$/, "") === raw.replace(/=+$/, "");
-  if (decoded.length === AES_256_KEY_BYTES && roundTrips) return decoded;
+  if (BASE64_ANY.test(raw)) {
+    // Normalise base64url (`-` `_`) to the standard alphabet before decoding.
+    const base64 = Buffer.from(raw.replace(/-/g, "+").replace(/_/g, "/"), "base64");
+    if (base64.length === AES_256_KEY_BYTES) return base64;
+    attempts.push(`${base64.length} bytes as base64`);
+  }
 
+  const detail = attempts.length > 0 ? ` (got ${attempts.join(", ")})` : "";
   throw new ConfigError(
     "RETURN_ENCRYPTION_KEY must be a 32-byte AES-256 key, hex-encoded (64 characters) " +
-      "or base64-encoded (44 characters) — generate one with `openssl rand -hex 32`",
+      `or base64-encoded (44 characters)${detail} — generate one with \`openssl rand -hex 32\``,
   );
 }
 

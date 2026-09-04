@@ -33,6 +33,14 @@ describe("loadConfig — valid config", () => {
     expect(config.encryptionKey).toHaveLength(32);
   });
 
+  it("accepts a base64url-encoded encryption key (contains - or _)", () => {
+    const keyBytes = Buffer.alloc(32, 0xfb);
+    const b64url = keyBytes.toString("base64url");
+    expect(b64url).toMatch(/[-_]/);
+    const config = load(baseEnv({ RETURN_ENCRYPTION_KEY: b64url }));
+    expect(config.encryptionKey.equals(keyBytes)).toBe(true);
+  });
+
   it("accepts ANTHROPIC_API_KEY as the sole Claude credential", () => {
     const config = load(
       baseEnv({ CLAUDE_CODE_OAUTH_TOKEN: undefined, ANTHROPIC_API_KEY: API_KEY }),
@@ -59,11 +67,27 @@ describe("loadConfig — invalid config fails startup with a clear message", () 
 
   it("rejects a malformed encryption key", () => {
     expect(() => load(baseEnv({ RETURN_ENCRYPTION_KEY: "deadbeef" }))).toThrow(
-      /32-byte AES-256 key is 64 hex characters/,
+      /must be a 32-byte AES-256 key/,
     );
     expect(() => load(baseEnv({ RETURN_ENCRYPTION_KEY: "not a valid key!!" }))).toThrow(
       /must be a 32-byte AES-256 key/,
     );
+  });
+
+  it("classifies the encryption key by decoded length, not by alphabet", () => {
+    // 44 hex-only chars: a truncated/mistyped key, not a base64 key. The message
+    // must not claim "64 hex characters" — 44 is the base64 length.
+    const key44 = "a".repeat(44);
+    let message = "";
+    try {
+      load(baseEnv({ RETURN_ENCRYPTION_KEY: key44 }));
+      expect.unreachable();
+    } catch (err) {
+      message = (err as Error).message;
+    }
+    expect(message).toMatch(/must be a 32-byte AES-256 key/);
+    expect(message).not.toMatch(/64 hex characters/);
+    expect(message).toMatch(/bytes as hex/);
   });
 
   it("rejects both Claude credentials set at once", () => {
@@ -128,7 +152,10 @@ describe("secret hygiene", () => {
       list: [config.encryptionKey.toString("hex")],
     };
 
-    const cleaned = redact(payload, secretValues(config));
+    const cleaned = redact(payload, secretValues(config)) as {
+      message: string;
+      nested: { auth: string };
+    };
     const asText = JSON.stringify(cleaned);
 
     expect(asText).not.toContain(HEX_KEY);
@@ -136,5 +163,37 @@ describe("secret hygiene", () => {
     expect(asText).not.toContain(config.encryptionKey.toString("hex"));
     expect(cleaned.message).toContain("[redacted]");
     expect(cleaned.nested.auth).toBe("Bearer [redacted]");
+  });
+
+  it("redact() preserves non-plain values instead of corrupting them to {}", () => {
+    const config = load(baseEnv());
+    const now = new Date();
+    const payload = {
+      when: now,
+      key: config.encryptionKey, // a Buffer
+      failure: new Error(`boom with ${config.secrets.claudeCodeOauthToken}`),
+      tags: new Set(["a", "b"]),
+      lookup: new Map([["k", "v"]]),
+    };
+
+    const cleaned = redact(payload, secretValues(config)) as Record<string, unknown>;
+
+    expect(cleaned.when).toBe(now); // Date passed through, not {}
+    expect(cleaned.key).toBe("[Buffer]");
+    expect(cleaned.failure).toBe(`[Error: boom with ${"[redacted]"}]`);
+    expect(cleaned.tags).toBe("[Set(2)]");
+    expect(cleaned.lookup).toBe("[Map(1)]");
+  });
+
+  it("redact() renders a circular reference as [Circular] without recursing forever", () => {
+    const config = load(baseEnv());
+    const node: Record<string, unknown> = { name: "root" };
+    node.self = node;
+    node.child = { parent: node };
+
+    const cleaned = redact(node, secretValues(config)) as Record<string, unknown>;
+
+    expect(cleaned.self).toBe("[Circular]");
+    expect((cleaned.child as Record<string, unknown>).parent).toBe("[Circular]");
   });
 });
