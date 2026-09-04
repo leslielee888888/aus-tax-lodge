@@ -1,0 +1,28 @@
+# dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# builds
+.next/
+out/
+dist/
+build/
+*.tsbuildinfo
+
+# env & secrets
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# runtime data (encrypted returns/documents live on a volume, never in the repo)
+data/
+*.return.json
+
+# logs & caches
+*.log
+npm-debug.log*
+.turbo/
+coverage/
+.DS_Store
