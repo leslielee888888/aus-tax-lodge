@@ -10,6 +10,7 @@ const REDACTED = "[redacted]";
 export function secretValues(config: AppConfig): string[] {
   const candidates = [
     config.secrets.returnEncryptionKey,
+    config.secrets.appPassphrase,
     config.secrets.anthropicApiKey,
     config.secrets.claudeCodeOauthToken,
     config.encryptionKey.toString("hex"),

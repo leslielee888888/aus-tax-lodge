@@ -62,6 +62,8 @@ function decodeEncryptionKey(raw: string): Buffer {
  * Reads and validates the runtime configuration from the environment:
  *
  *  - `RETURN_ENCRYPTION_KEY` — the AES-256 key for at-rest encryption (PRD FR-17).
+ *  - `APP_PASSPHRASE` — the shared passphrase that gates access to the app (PRD
+ *    FR-17). Required; an access gate only, independent of the encryption key.
  *  - `DATA_DIR` — where the encrypted per-return data lives on the volume (PRD
  *    FR-16 / §8). Optional; resolved to an absolute path, default `./data`.
  *  - exactly one Claude credential — `CLAUDE_CODE_OAUTH_TOKEN` **or**
@@ -92,6 +94,15 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
   }
   const encryptionKey = decodeEncryptionKey(rawKey);
 
+  const appPassphrase = trimmedOrUndefined(env.APP_PASSPHRASE);
+  if (appPassphrase === undefined) {
+    throw new ConfigError(
+      "APP_PASSPHRASE is not set — it is the shared passphrase that gates access " +
+        "to the app (FR-17). It only controls access and is independent of " +
+        "RETURN_ENCRYPTION_KEY, so it can be changed on the NAS with the data intact",
+    );
+  }
+
   const dataDir = resolve(trimmedOrUndefined(env.DATA_DIR) ?? "data");
 
   const apiKey = trimmedOrUndefined(env.ANTHROPIC_API_KEY);
@@ -119,6 +130,7 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
     claudeCredential,
     secrets: {
       returnEncryptionKey: rawKey,
+      appPassphrase,
       ...(apiKey !== undefined ? { anthropicApiKey: apiKey } : {}),
       ...(oauthToken !== undefined ? { claudeCodeOauthToken: oauthToken } : {}),
     },
