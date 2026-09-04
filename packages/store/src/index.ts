@@ -1,6 +1,18 @@
 export { decrypt, decryptJson, encrypt, encryptJson, ENCRYPTION_OVERHEAD_BYTES } from "./crypto";
 export { createDocumentStore, type DocumentStore } from "./store";
 export {
+  createReturnRepository,
+  RETURN_SCHEMA_VERSION,
+  type CreateReturnInput,
+  type LoadReturnResult,
+  type ReturnEnvelope,
+  type ReturnRepository,
+  type ReturnStatus,
+  type ReturnSummary,
+  type SaveReturnInput,
+  type SaveReturnResult,
+} from "./returns";
+export {
   documentBlobPath,
   documentMetaPath,
   documentsDir,
