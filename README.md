@@ -20,6 +20,45 @@ Anything outside that — co-owned or short-stay rental, capital gains, business
 foreign income, prior years — hard-stops and points the user to a registered tax
 agent or myTax.
 
+## Repository layout
+
+npm workspaces, Node 20 LTS (`.nvmrc`).
+
+| Path              | What                                                                                                                                                  |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/engine` | Deterministic tax-calculation engine — pure TypeScript, zero framework deps, with a `node` CLI harness (`bin/harness.ts`). Real logic lands in T3–T5. |
+| `packages/config` | Startup config/env loader and secret-redaction helpers.                                                                                               |
+| `apps/web`        | Next.js (App Router) + TypeScript + Tailwind CSS front end. Screens land in T14+.                                                                     |
+
+## Local development
+
+```sh
+nvm use            # Node 20
+npm install
+npm run typecheck  # tsc --noEmit across every workspace
+npm run lint       # eslint (packages) + next lint (web)
+npm test           # vitest across every workspace
+npm run build      # next build (+ workspace builds)
+npm run harness    # run the engine CLI harness
+```
+
+## Configuration
+
+Copy `.env.example` to `.env` (git-ignored — never commit it) and set:
+
+- `RETURN_ENCRYPTION_KEY` — AES-256 key (32 bytes, hex or base64) that encrypts
+  `return.json` and uploaded documents at rest. Generate with `openssl rand -hex 32`.
+  Losing it makes existing returns unrecoverable.
+- **Exactly one** Claude credential — `CLAUDE_CODE_OAUTH_TOKEN` (a Claude
+  subscription, via `claude setup-token`; the intended path) **or**
+  `ANTHROPIC_API_KEY` (pay-as-you-go). Setting both fails startup; a blank
+  `ANTHROPIC_API_KEY` is cleared so it can't shadow the OAuth token.
+
+The loader (`@aus-tax-lodge/config`) validates these at startup and, on anything
+missing or malformed, exits with a one-line message naming the problem. It never
+logs a secret value; use its `redact()` / `describeConfig()` helpers for anything
+that prints configuration.
+
 ## Status
 
-Development just started. See the milestone and project board.
+Scaffold in place (T1). See the milestone and project board.

@@ -1,0 +1,30 @@
+{
+  "name": "aus-tax-lodge",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Self-hosted assistant for preparing your own Australian individual tax return. Not tax advice.",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "harness": "npm -w @aus-tax-lodge/engine run harness",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.13.0",
+    "eslint": "^9.13.0",
+    "globals": "^15.11.0",
+    "prettier": "^3.3.3",
+    "typescript": "^5.6.3",
+    "typescript-eslint": "^8.12.0"
+  },
+  "engines": {
+    "node": ">=20 <21"
+  }
+}
