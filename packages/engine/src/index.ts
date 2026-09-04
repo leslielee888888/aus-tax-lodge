@@ -1,6 +1,24 @@
 export { ENGINE_VERSION } from "./version";
-export { estimate } from "./estimate";
+export {
+  assessCore,
+  computeAssessableIncome,
+  computeTaxableIncome,
+  grossUpDividends,
+  residentIncomeTax,
+} from "./core";
 export { buildHarnessReport } from "./harness";
+
+export type {
+  ResidencyStatus,
+  DividendIncome,
+  EngineIncomeInput,
+  EngineDeductionsInput,
+  EngineContextInput,
+  EngineInput,
+  AssessableIncomeBreakdown,
+  CoreAssessment,
+  EngineResult,
+} from "./types";
 
 /**
  * Re-exported from `@aus-tax-lodge/params` so callers (the estimate output, the
