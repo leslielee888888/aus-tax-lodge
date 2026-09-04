@@ -24,11 +24,12 @@ agent or myTax.
 
 npm workspaces, Node 20 LTS (`.nvmrc`).
 
-| Path              | What                                                                                                                                                  |
-| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/engine` | Deterministic tax-calculation engine — pure TypeScript, zero framework deps, with a `node` CLI harness (`bin/harness.ts`). Real logic lands in T3–T5. |
-| `packages/config` | Startup config/env loader and secret-redaction helpers.                                                                                               |
-| `apps/web`        | Next.js (App Router) + TypeScript + Tailwind CSS front end. Screens land in T14+.                                                                     |
+| Path              | What                                                                                                                                                                                                                                                                                                 |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/engine` | Deterministic tax-calculation engine — pure TypeScript, zero framework deps, with a `node` CLI harness (`bin/harness.ts`). Real logic lands in T3–T5.                                                                                                                                                |
+| `packages/params` | Versioned ATO tax parameters (rates, thresholds, offsets, rounding) + the individual-return label taxonomy, as data with a typed accessor. Each figure carries its ato.gov.au source URL and a verification date (FR-15). Rolling to a new income year is a config addition here — no engine change. |
+| `packages/config` | Startup config/env loader and secret-redaction helpers.                                                                                                                                                                                                                                              |
+| `apps/web`        | Next.js (App Router) + TypeScript + Tailwind CSS front end. Screens land in T14+.                                                                                                                                                                                                                    |
 
 ## Local development
 
@@ -61,4 +62,7 @@ that prints configuration.
 
 ## Status
 
-Scaffold in place (T1). See the milestone and project board.
+Scaffold in place (T1). 2025-26 tax-parameter config + ATO label taxonomy in
+place (T2) — **figures AI-researched and pending human verification**, see
+[`packages/params/VERIFY-2025-26.md`](packages/params/VERIFY-2025-26.md). See the
+milestone and project board.
