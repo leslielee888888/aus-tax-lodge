@@ -1,17 +1,16 @@
 import { describe, expect, it } from "vitest";
 
-import { buildHarnessReport, ENGINE_VERSION, estimate } from "../src/index";
+import { buildHarnessReport, ENGINE_VERSION } from "../src/index";
 
-describe("engine placeholder surface", () => {
+describe("engine public surface", () => {
   it("exposes a semver-shaped version string", () => {
     expect(ENGINE_VERSION).toMatch(/^\d+\.\d+\.\d+$/);
   });
 
-  it("estimate() throws 'not implemented' until T3/T4", () => {
-    expect(() => estimate()).toThrow(/not implemented/i);
-  });
-
-  it("the harness report names the engine version", () => {
-    expect(buildHarnessReport()).toContain(`engine version: ${ENGINE_VERSION}`);
+  it("the harness report names the engine version and runs the worked example", () => {
+    const report = buildHarnessReport();
+    expect(report).toContain(`engine version: ${ENGINE_VERSION}`);
+    expect(report).toContain("total assessable income");
+    expect(report).toContain("resident income tax on taxable income");
   });
 });
