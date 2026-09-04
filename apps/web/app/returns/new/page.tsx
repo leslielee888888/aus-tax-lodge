@@ -1,0 +1,49 @@
+import type { Metadata } from "next";
+import { redirect } from "next/navigation";
+
+import { Card } from "../../../components/Card";
+import { TopBar } from "../../../components/TopBar";
+import { readAcknowledgement } from "../../../lib/acknowledgement";
+import { AcknowledgeGate } from "./AcknowledgeGate";
+
+export const dynamic = "force-dynamic";
+
+export const metadata: Metadata = { title: "Before your first return · Return Assistant" };
+
+/**
+ * First-run acknowledgement screen (PRD FR-19). Reached only from "New return"
+ * when the acknowledgement has not been recorded; once it has, "New return"
+ * creates the return directly, so a direct visit here just returns to the list.
+ */
+export default async function NewReturnPage() {
+  if (await readAcknowledgement()) redirect("/");
+
+  return (
+    <>
+      <TopBar>
+        <span className="rounded-full border border-border px-2.5 py-0.5 text-[11px] text-muted">
+          Unlocked
+        </span>
+      </TopBar>
+
+      <main className="mx-auto max-w-xl px-6 py-16 md:px-10">
+        <Card className="p-7">
+          <h1 className="text-pretty font-serif text-xl font-medium">Before your first return</h1>
+          <p className="mt-2.5 text-xs text-muted">
+            This tool helps you prepare a simple individual return from your own documents. It is{" "}
+            <strong className="font-semibold text-text">not</strong> tax advice and does not lodge
+            anything for you.
+          </p>
+          <p className="mb-4 mt-2 text-xs text-muted">
+            The figures and the refund it shows are an{" "}
+            <strong className="font-semibold text-text">estimate</strong>. The ATO&rsquo;s
+            assessment, once you lodge in myTax, is the final word — and the lodged return is your
+            responsibility.
+          </p>
+
+          <AcknowledgeGate />
+        </Card>
+      </main>
+    </>
+  );
+}

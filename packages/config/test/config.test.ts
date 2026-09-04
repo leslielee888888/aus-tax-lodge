@@ -12,6 +12,7 @@ const API_KEY = "sk-ant-fake-api-key-1111";
 function baseEnv(overrides: Record<string, string | undefined> = {}): NodeJS.ProcessEnv {
   return {
     RETURN_ENCRYPTION_KEY: HEX_KEY,
+    APP_PASSPHRASE: "open sesame please",
     CLAUDE_CODE_OAUTH_TOKEN: OAUTH_TOKEN,
     ...overrides,
   } as NodeJS.ProcessEnv;
@@ -28,6 +29,11 @@ describe("loadConfig — valid config", () => {
     expect(config.encryptionKey).toHaveLength(32);
     expect(config.secrets.claudeCodeOauthToken).toBe(OAUTH_TOKEN);
     expect(config.secrets.anthropicApiKey).toBeUndefined();
+  });
+
+  it("loads the shared access passphrase (APP_PASSPHRASE)", () => {
+    const config = load(baseEnv({ APP_PASSPHRASE: "  correct horse battery  " }));
+    expect(config.secrets.appPassphrase).toBe("correct horse battery");
   });
 
   it("accepts a base64-encoded encryption key", () => {
@@ -108,6 +114,11 @@ describe("loadConfig — invalid config fails startup with a clear message", () 
     expect(message).toMatch(/must be a 32-byte AES-256 key/);
     expect(message).not.toMatch(/64 hex characters/);
     expect(message).toMatch(/bytes as hex/);
+  });
+
+  it("rejects a missing APP_PASSPHRASE, naming it", () => {
+    expect(() => load(baseEnv({ APP_PASSPHRASE: undefined }))).toThrow(ConfigError);
+    expect(() => load(baseEnv({ APP_PASSPHRASE: "   " }))).toThrow(/APP_PASSPHRASE is not set/);
   });
 
   it("rejects both Claude credentials set at once", () => {

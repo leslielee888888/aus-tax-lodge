@@ -3,21 +3,122 @@
 @tailwind utilities;
 
 /*
- * Scaffold-only base styles. The full design-system tokens (light + dark,
- * matching the mockup canvas) land with the UI tasks (T14+).
+ * Warm-cream / clay design system, lifted from the mockup canvas
+ * (docs/prd/design/aus-tax-lodge/*.dc.html). Three-state theming:
+ *
+ *   :root                                   → light (the default)
+ *   @media (prefers-color-scheme: dark)
+ *     :root:not([data-theme="light"])       → dark, following the OS
+ *   :root[data-theme="dark"]                → dark, forced by a future toggle
+ *   :root[data-theme="light"]               → light, forced (wins over the media query)
+ *
+ * tailwind.config.ts maps every --token below to a utility (bg-surface,
+ * text-muted, border-border, shadow-card, rounded-card, …).
  */
-:root {
-  color-scheme: light dark;
-}
+@layer base {
+  :root {
+    color-scheme: light;
 
-body {
-  background: #fbfaf9;
-  color: #1c1a17;
-}
+    --bg: #faf5ef;
+    --surface: #fffdfb;
+    --surface-2: #f2ebdf;
+    --text: #2d2621;
+    --muted: #7d7268;
+    --border: #e9dfd0;
 
-@media (prefers-color-scheme: dark) {
+    --accent: #b25c3c;
+    --accent-hover: #9c4e31;
+    --accent-ink: #ffffff;
+    --accent-soft: #f4e3da;
+
+    --ok: #4f8a4d;
+    --ok-soft: #e9f0e1;
+    --warn: #a97a2a;
+    --warn-soft: #f6ecd7;
+    --danger: #c04f3e;
+    --danger-soft: #f7e5e0;
+    --unverified: #8c6b86;
+    --unverified-soft: #f1e7ed;
+
+    --shadow:
+      0 1px 2px rgba(60, 40, 25, 0.05), 0 3px 12px rgba(60, 40, 25, 0.07);
+    --radius: 11px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+
+      --bg: #1c1713;
+      --surface: #26201c;
+      --surface-2: #312a24;
+      --text: #efe7dd;
+      --muted: #a99c8d;
+      --border: #3b332b;
+
+      --accent: #e2926f;
+      --accent-hover: #eaa688;
+      --accent-ink: #1c1713;
+      --accent-soft: #35251f;
+
+      --ok: #7cb072;
+      --ok-soft: #20291b;
+      --warn: #d3a45e;
+      --warn-soft: #2f2616;
+      --danger: #e07666;
+      --danger-soft: #301b18;
+      --unverified: #b795bb;
+      --unverified-soft: #2a222f;
+
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 4px 16px rgba(0, 0, 0, 0.4);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+
+    --bg: #1c1713;
+    --surface: #26201c;
+    --surface-2: #312a24;
+    --text: #efe7dd;
+    --muted: #a99c8d;
+    --border: #3b332b;
+
+    --accent: #e2926f;
+    --accent-hover: #eaa688;
+    --accent-ink: #1c1713;
+    --accent-soft: #35251f;
+
+    --ok: #7cb072;
+    --ok-soft: #20291b;
+    --warn: #d3a45e;
+    --warn-soft: #2f2616;
+    --danger: #e07666;
+    --danger-soft: #301b18;
+    --unverified: #b795bb;
+    --unverified-soft: #2a222f;
+
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 4px 16px rgba(0, 0, 0, 0.4);
+  }
+
+  * {
+    border-color: var(--border);
+  }
+
   body {
-    background: #1b1a19;
-    color: #ececea;
+    background: var(--bg);
+    color: var(--text);
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-family:
+      var(--font-spectral), Georgia, "Times New Roman", serif;
+    font-weight: 500;
+  }
+
+  ::selection {
+    background: var(--accent-soft);
   }
 }

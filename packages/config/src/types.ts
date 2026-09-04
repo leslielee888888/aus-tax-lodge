@@ -4,6 +4,13 @@ export type ClaudeCredentialKind = "ANTHROPIC_API_KEY" | "CLAUDE_CODE_OAUTH_TOKE
 export interface AppSecrets {
   /** Raw `RETURN_ENCRYPTION_KEY` value as supplied (hex or base64). */
   returnEncryptionKey: string;
+  /**
+   * `APP_PASSPHRASE` — the shared passphrase that gates access to the app
+   * (PRD FR-17). An access gate only: it is **independent of**
+   * `returnEncryptionKey`, so changing it on the NAS leaves the encrypted data
+   * intact. Always set — the app is unusable without it.
+   */
+  appPassphrase: string;
   /** Set only when the pay-as-you-go Anthropic API key is the active credential. */
   anthropicApiKey?: string;
   /** Set only when the Claude subscription OAuth token is the active credential. */
@@ -26,6 +33,7 @@ export interface AppConfig {
 
 export const SECRET_KEYS = [
   "returnEncryptionKey",
+  "appPassphrase",
   "anthropicApiKey",
   "claudeCodeOauthToken",
 ] as const;
@@ -34,6 +42,7 @@ export type SecretKey = (typeof SECRET_KEYS)[number];
 /** Maps each {@link AppSecrets} key to its environment-variable name, for messages. */
 export const SECRET_ENV_NAMES: Record<SecretKey, string> = {
   returnEncryptionKey: "RETURN_ENCRYPTION_KEY",
+  appPassphrase: "APP_PASSPHRASE",
   anthropicApiKey: "ANTHROPIC_API_KEY",
   claudeCodeOauthToken: "CLAUDE_CODE_OAUTH_TOKEN",
 };
