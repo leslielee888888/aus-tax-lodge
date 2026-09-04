@@ -7,6 +7,7 @@ const nextConfig: NextConfig = {
     "@aus-tax-lodge/ai",
     "@aus-tax-lodge/config",
     "@aus-tax-lodge/engine",
+    "@aus-tax-lodge/model",
     "@aus-tax-lodge/params",
     "@aus-tax-lodge/store",
   ],
