@@ -7,11 +7,14 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
+    "@aus-tax-lodge/ai": "*",
     "@aus-tax-lodge/config": "*",
     "@aus-tax-lodge/engine": "*",
+    "@aus-tax-lodge/store": "*",
     "next": "^15.5.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
@@ -26,6 +29,7 @@
     "eslint-config-next": "^15.5.0",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.15",
-    "typescript": "^5.6.3"
+    "typescript": "^5.6.3",
+    "vitest": "^3.2.7"
   }
 }

@@ -1,3 +1,5 @@
+import { resolve } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import { ConfigError, describeConfig, loadConfig, redact, secretValues } from "../src/index";
@@ -48,6 +50,24 @@ describe("loadConfig — valid config", () => {
     expect(config.claudeCredential).toBe("ANTHROPIC_API_KEY");
     expect(config.secrets.anthropicApiKey).toBe(API_KEY);
     expect(config.secrets.claudeCodeOauthToken).toBeUndefined();
+  });
+});
+
+describe("DATA_DIR", () => {
+  it("defaults to an absolute ./data path when unset", () => {
+    const config = load(baseEnv());
+    expect(config.dataDir).toBe(resolve("data"));
+  });
+
+  it("resolves a relative DATA_DIR to an absolute path", () => {
+    const config = load(baseEnv({ DATA_DIR: "var/atl" }));
+    expect(config.dataDir).toBe(resolve("var/atl"));
+  });
+
+  it("keeps an already-absolute DATA_DIR", () => {
+    const abs = resolve("/srv/atl-data");
+    const config = load(baseEnv({ DATA_DIR: abs }));
+    expect(config.dataDir).toBe(abs);
   });
 });
 
