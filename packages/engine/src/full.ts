@@ -128,13 +128,20 @@ function findIncomeTier<T extends TierBounds>(
 /**
  * Medicare levy after the low-income reduction / shade-in (PRD FR-9).
  *
- * On any basis the levy is `min(shadeInRate × (testIncome − lowerThreshold),
- * rate × yourTaxableIncome)`, and nil when `testIncome ≤ lowerThreshold`. For a
- * single, `testIncome` is the taxpayer's own taxable income against the single
- * threshold. For a family it is the combined family taxable income against the
- * family threshold (raised per dependent child). A family taxpayer receives
- * whichever basis leaves the lower levy — the ATO lets a partnered low earner
- * still benefit from the single low-income reduction.
+ * The basis is fixed by family status, then the reduction (if any) is applied
+ * *within* that basis — the two bases are never `min()`-ed together (Medicare
+ * Levy Act 1986 s7/s8; ATO "Medicare levy reduction – family income").
+ *
+ * - No spouse and no dependent children → the **single** basis: nil at or below
+ *   the single lower threshold, then a 10c-per-dollar shade-in on the taxpayer's
+ *   own taxable income, capped at 2% of that income.
+ * - With a spouse and/or dependent children → the **family** basis: the
+ *   reduction applies only while **family income** sits within the family
+ *   reduction range — from the family lower threshold (raised per dependent
+ *   child) up to the point the 10c-per-dollar reduction against the 2% rate
+ *   exhausts (the `Math.min(…, fullLevy)` cap). Above that range the taxpayer
+ *   pays the full 2% of their own taxable income; they do **not** fall back to
+ *   the single low-income shade-in.
  */
 export function computeMedicareLevy(
   taxableIncome: number,
@@ -150,11 +157,10 @@ export function computeMedicareLevy(
     return Math.min(ml.shadeInRate * (testIncome - lowerThreshold), fullLevy);
   };
 
-  const single = onBasis(taxableIncome, ml.single.lower);
-  if (!isFamily) return round2(single);
+  if (!isFamily) return round2(onBasis(taxableIncome, ml.single.lower));
 
   const familyThreshold = ml.family.lower + dependentChildren * ml.familyChildIncrement.lower;
-  return round2(Math.min(single, onBasis(familyIncome, familyThreshold)));
+  return round2(onBasis(familyIncome, familyThreshold));
 }
 
 // ---------------------------------------------------------------------------

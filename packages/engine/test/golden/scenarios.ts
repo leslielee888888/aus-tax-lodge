@@ -742,7 +742,7 @@ export const scenarios: readonly Scenario[] = [
   },
 
   // -------------------------------------------------------------------------
-  // Known-defect probe — reported in the PR (engine disagrees with the authority)
+  // Medicare levy — family basis, no reduction above the family reduction range
   // -------------------------------------------------------------------------
   {
     id: "G44",
@@ -755,7 +755,5 @@ export const scenarios: readonly Scenario[] = [
       context: { spouseTaxableIncome: 70_000, privateHospitalCoverDays: 365 },
     }),
     expected: { medicareLevy: 640, outcomeSigned: 2_148 },
-    defect:
-      "engine computeMedicareLevy() returns min(single-basis $398.90, family-basis $640.00) = $398.90 and outcomeSigned $1,906.90 — it lets a partnered taxpayer keep the single low-income shade-in when family income is above the family threshold. Under-levies by $241.10 here.",
   },
 ];
