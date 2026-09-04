@@ -13,6 +13,12 @@ export interface AppSecrets {
 export interface AppConfig {
   /** Decoded 32-byte AES-256 key for `return.json` + document encryption (PRD FR-17). */
   readonly encryptionKey: Buffer;
+  /**
+   * Absolute path to the directory holding the encrypted per-return data on the
+   * mounted volume (PRD FR-16 / §8 — no database). Returns live under
+   * `<dataDir>/returns/<returnId>/`. From `DATA_DIR`, default `./data`.
+   */
+  readonly dataDir: string;
   /** Which Claude credential is active. The value under it lives in {@link AppConfig.secrets}. */
   readonly claudeCredential: ClaudeCredentialKind;
   readonly secrets: AppSecrets;

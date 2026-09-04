@@ -29,7 +29,9 @@ npm workspaces, Node 20 LTS (`.nvmrc`).
 | `packages/engine` | Deterministic tax-calculation engine — pure TypeScript, zero framework deps, with a `node` CLI harness (`bin/harness.ts`). Real logic lands in T3–T5.                                                                                                                                                |
 | `packages/params` | Versioned ATO tax parameters (rates, thresholds, offsets, rounding) + the individual-return label taxonomy, as data with a typed accessor. Each figure carries its ato.gov.au source URL and a verification date (FR-15). Rolling to a new income year is a config addition here — no engine change. |
 | `packages/config` | Startup config/env loader and secret-redaction helpers.                                                                                                                                                                                                                                              |
-| `apps/web`        | Next.js (App Router) + TypeScript + Tailwind CSS front end. Screens land in T14+.                                                                                                                                                                                                                    |
+| `packages/store`  | Per-return encrypted document store — AES-256-GCM blobs + encrypted metadata on the `DATA_DIR` volume (PRD FR-2, FR-16, FR-17). Pure TypeScript.                                                                                                                                                     |
+| `packages/ai`     | Shared Claude client (`ask` / `askVision`, model `claude-sonnet-5`) and document-type classification (PRD FR-2). Figure extraction builds on it (T11).                                                                                                                                               |
+| `apps/web`        | Next.js (App Router) + TypeScript + Tailwind CSS front end. Screens land in T14+. Document upload route handler at `app/api/returns/[returnId]/documents`.                                                                                                                                           |
 
 ## Local development
 
@@ -50,6 +52,8 @@ Copy `.env.example` to `.env` (git-ignored — never commit it) and set:
 - `RETURN_ENCRYPTION_KEY` — AES-256 key (32 bytes, hex or base64) that encrypts
   `return.json` and uploaded documents at rest. Generate with `openssl rand -hex 32`.
   Losing it makes existing returns unrecoverable.
+- `DATA_DIR` — directory holding the encrypted per-return data (`<DATA_DIR>/returns/<returnId>/…`).
+  Optional; resolved to an absolute path; defaults to `./data`. In the container it is the volume mount.
 - **Exactly one** Claude credential — `CLAUDE_CODE_OAUTH_TOKEN` (a Claude
   subscription, via `claude setup-token`; the intended path) **or**
   `ANTHROPIC_API_KEY` (pay-as-you-go). Setting both fails startup; a blank
@@ -62,7 +66,4 @@ that prints configuration.
 
 ## Status
 
-Scaffold in place (T1). 2025-26 tax-parameter config + ATO label taxonomy in
-place (T2) — **figures AI-researched and pending human verification**, see
-[`packages/params/VERIFY-2025-26.md`](packages/params/VERIFY-2025-26.md). See the
-milestone and project board.
+Scaffold in place (T1). See the milestone and project board.

@@ -17,12 +17,16 @@
     "noEmit": true,
     "baseUrl": ".",
     "paths": {
-      "@aus-tax-lodge/engine": ["packages/engine/src/index.ts"],
-      "@aus-tax-lodge/engine/*": ["packages/engine/src/*"],
+      "@aus-tax-lodge/ai": ["packages/ai/src/index.ts"],
+      "@aus-tax-lodge/ai/*": ["packages/ai/src/*"],
       "@aus-tax-lodge/config": ["packages/config/src/index.ts"],
       "@aus-tax-lodge/config/*": ["packages/config/src/*"],
+      "@aus-tax-lodge/engine": ["packages/engine/src/index.ts"],
+      "@aus-tax-lodge/engine/*": ["packages/engine/src/*"],
       "@aus-tax-lodge/params": ["packages/params/src/index.ts"],
-      "@aus-tax-lodge/params/*": ["packages/params/src/*"]
+      "@aus-tax-lodge/params/*": ["packages/params/src/*"],
+      "@aus-tax-lodge/store": ["packages/store/src/index.ts"],
+      "@aus-tax-lodge/store/*": ["packages/store/src/*"]
     }
   }
 }

@@ -1,3 +1,5 @@
+import { resolve } from "node:path";
+
 import { config as loadDotenv } from "dotenv";
 
 import { ConfigError } from "./errors";
@@ -60,6 +62,8 @@ function decodeEncryptionKey(raw: string): Buffer {
  * Reads and validates the runtime configuration from the environment:
  *
  *  - `RETURN_ENCRYPTION_KEY` — the AES-256 key for at-rest encryption (PRD FR-17).
+ *  - `DATA_DIR` — where the encrypted per-return data lives on the volume (PRD
+ *    FR-16 / §8). Optional; resolved to an absolute path, default `./data`.
  *  - exactly one Claude credential — `CLAUDE_CODE_OAUTH_TOKEN` **or**
  *    `ANTHROPIC_API_KEY` (PRD §8). Both set is an error; a blank
  *    `ANTHROPIC_API_KEY` is cleared so it cannot shadow the OAuth token.
@@ -88,6 +92,8 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
   }
   const encryptionKey = decodeEncryptionKey(rawKey);
 
+  const dataDir = resolve(trimmedOrUndefined(env.DATA_DIR) ?? "data");
+
   const apiKey = trimmedOrUndefined(env.ANTHROPIC_API_KEY);
   const oauthToken = trimmedOrUndefined(env.CLAUDE_CODE_OAUTH_TOKEN);
 
@@ -109,6 +115,7 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
 
   return {
     encryptionKey,
+    dataDir,
     claudeCredential,
     secrets: {
       returnEncryptionKey: rawKey,

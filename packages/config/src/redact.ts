@@ -93,6 +93,7 @@ export function describeConfig(config: AppConfig): string {
     "Resolved configuration:",
     `  claude credential   ${config.claudeCredential}`,
     `  encryption key      ${config.encryptionKey.length} bytes (AES-256)`,
+    `  data dir            ${config.dataDir}`,
     "  secrets:",
   ];
   for (const key of SECRET_KEYS) {
