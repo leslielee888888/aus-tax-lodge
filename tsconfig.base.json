@@ -23,6 +23,8 @@
       "@aus-tax-lodge/config/*": ["packages/config/src/*"],
       "@aus-tax-lodge/engine": ["packages/engine/src/index.ts"],
       "@aus-tax-lodge/engine/*": ["packages/engine/src/*"],
+      "@aus-tax-lodge/model": ["packages/model/src/index.ts"],
+      "@aus-tax-lodge/model/*": ["packages/model/src/*"],
       "@aus-tax-lodge/params": ["packages/params/src/index.ts"],
       "@aus-tax-lodge/params/*": ["packages/params/src/*"],
       "@aus-tax-lodge/store": ["packages/store/src/index.ts"],
