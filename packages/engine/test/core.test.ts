@@ -20,6 +20,7 @@ const BASE: EngineInput = {
     netRentalResult: 0,
     reportableFringeBenefits: 0,
     reportableEmployerSuper: 0,
+    privateHealth: null,
   },
   deductions: { total: 0 },
   context: {
@@ -27,6 +28,7 @@ const BASE: EngineInput = {
     spouseTaxableIncome: null,
     privateHospitalCoverDays: 0,
     holdsStudyLoan: false,
+    dependentChildren: 0,
   },
 };
 

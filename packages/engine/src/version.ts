@@ -4,6 +4,9 @@
  * which is rolled forward each income year without an engine change.
  *
  * 0.1.0 — T3: core calc (assessable income → deductions → taxable income →
- * resident income tax). T4 extends the result with levies, offsets and credits.
+ * resident income tax).
+ * 0.2.0 — T4: full assessment (`assess`) — Medicare levy + surcharge, LITO,
+ * beneficiary offset, PHI rebate reconciliation, study-loan repayment, franking
+ * + PAYG credits, the FR-23 income tests, and the final refund / amount owing.
  */
-export const ENGINE_VERSION = "0.1.0";
+export const ENGINE_VERSION = "0.2.0";
