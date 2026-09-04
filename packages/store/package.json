@@ -8,6 +8,9 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "dependencies": {
+    "@aus-tax-lodge/params": "*"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
