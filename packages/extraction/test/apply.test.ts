@@ -79,6 +79,7 @@ describe("applyExtractions", () => {
         candidates: [
           {
             docId: "prefill-doc",
+            documentType: "ato-prefill-report",
             page: 2,
             snippet: "pre-fill: 400.00",
             confidence: "high",
@@ -86,6 +87,7 @@ describe("applyExtractions", () => {
           },
           {
             docId: "bank-notice-doc",
+            documentType: "bank-interest-notice",
             page: 1,
             snippet: "bank notice: 420.00",
             confidence: "high",

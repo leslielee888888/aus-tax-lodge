@@ -9,9 +9,12 @@
  * `ReturnModel`, always as `proposed` values (PRD FR-7) and surfacing, never
  * resolving, any disagreement between sources (PRD FR-21).
  *
+ * `resolveReconciliation` applies the user's pick once they've made it
+ * (PRD FR-21); `suggestDefaultChoice` is a UI-default helper only, never
+ * invoked automatically.
+ *
  * Out of scope here: rental agent statements and QS depreciation schedules
- * (a separate task, FR-24), the reconcile *decision* (T12), and the review
- * UI (T17).
+ * (a separate task, FR-24), and the picker UI itself (T17).
  */
 export type { ApplyExtractionsResult } from "./apply";
 export { applyExtractions } from "./apply";
@@ -32,6 +35,9 @@ export { parseExtractedFigures } from "./parse";
 
 export { EXTRACTABLE_DOCUMENT_PROMPTS, type DocumentPrompt } from "./prompts";
 
+export type { ResolveReconciliationResult } from "./reconcile";
+export { hasUnresolvedMismatches, resolveReconciliation, suggestDefaultChoice } from "./reconcile";
+
 export { extractTextLayer, locateSnippet, type TextLayer } from "./text-layer";
 
 export type {
@@ -39,6 +45,7 @@ export type {
   ExtractedFigure,
   PendingReconciliation,
   ReconciliationCandidate,
+  ReconciliationChoice,
   ScoredExtractedFigure,
 } from "./types";
 
