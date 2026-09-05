@@ -9,6 +9,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@aus-tax-lodge/ai": "*",
     "@aus-tax-lodge/engine": "*",
     "@aus-tax-lodge/params": "*"
   },

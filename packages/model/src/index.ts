@@ -3,11 +3,13 @@
  * the model → engine-input mapper (PRD FR-1, FR-4, FR-5, FR-6, FR-7, FR-11,
  * FR-22, FR-24).
  *
- * Pure TypeScript, no framework deps. The persistence layer
- * (`@aus-tax-lodge/store`) stores a {@link ReturnModel} verbatim inside its
- * opaque `data` payload; the extraction pipeline (T11) proposes figures onto it;
- * the review UI (T17) and questionnaire (T18) confirm them; T7 fills the rental
- * schedule; T9 reads it for out-of-scope detection; T8 validates it; and
+ * Pure TypeScript aside from `@aus-tax-lodge/ai` (the rental schedule's Claude
+ * vision calls). The persistence layer (`@aus-tax-lodge/store`) stores a
+ * {@link ReturnModel} verbatim inside its opaque `data` payload; the extraction
+ * pipeline (T11) proposes non-rental figures onto it; the review UI (T17) and
+ * questionnaire (T18) confirm them; {@link assembleRentalSchedule} (T7) fills
+ * the rental schedule from its three source documents plus owner-paid entries;
+ * T9 reads it for out-of-scope detection; T8 validates it; and
  * {@link toEngineInput} hands the confirmed figures to `@aus-tax-lodge/engine`.
  */
 
@@ -76,6 +78,24 @@ export {
 } from "./model";
 
 export { MissingFiguresError, toEngineInput } from "./to-engine-input";
+
+export {
+  type RentalSourceDocument,
+  type RentalSourceDocuments,
+  type OwnerPaidRentalExpenses,
+  type ParsedRentalFigure,
+  type AgentStatementLineItem,
+  type AgentStatementParseResult,
+  type LoanSummaryParseResult,
+  type QsScheduleParseResult,
+  parseAgentStatement,
+  parseLoanSummary,
+  parseQsSchedule,
+  assembleRentalSchedule,
+  needsRepairsConfirmation,
+  confirmRepairsAreDeductible,
+  reclassifyRepairsAsCapital,
+} from "./rental-assembly";
 
 export {
   type LabelAggregateStatus,
