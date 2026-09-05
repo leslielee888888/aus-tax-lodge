@@ -4,24 +4,12 @@ import type { ReturnSummary } from "@aus-tax-lodge/store";
 import { TARGET_YEAR } from "@aus-tax-lodge/params";
 
 import { formatDate, formatIncomeYear } from "../lib/format";
+import { stepLabel } from "../lib/steps";
 import { Badge, type BadgeTone } from "./Badge";
 import { buttonClassName } from "./Button";
 import { Card } from "./Card";
 import { ArrowRightIcon, FileIcon } from "./icons";
 import { NewReturnButton } from "./NewReturnButton";
-
-const STEP_LABELS: Record<string, string> = {
-  details: "Your details",
-  documents: "Documents",
-  review: "Review figures",
-  questions: "Questions",
-  estimate: "Estimate",
-  export: "Export",
-};
-
-function stepLabel(step: string): string {
-  return STEP_LABELS[step] ?? step;
-}
 
 interface Row {
   title: string;
