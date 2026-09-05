@@ -2,22 +2,38 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { detectOutOfScope, isBlocked } from "@aus-tax-lodge/scope";
+
 import { buttonClassName } from "../../../../components/Button";
 import { TopBar } from "../../../../components/TopBar";
 import { WizardSteps } from "../../../../components/WizardSteps";
+import { readExtractionScratch } from "../../../../lib/extraction-scratch";
 import { formatIncomeYear } from "../../../../lib/format";
+import { buildReviewData } from "../../../../lib/review/build-sections";
 import { loadReturnModel } from "../../../../lib/returns";
+import { getDocumentStore } from "../../../../lib/store";
+import { OutOfScopeReviewStop } from "./OutOfScopeReviewStop";
+import { ReviewReadOnly } from "./ReviewReadOnly";
+import { ReviewSections } from "./ReviewSections";
 
 export const metadata: Metadata = { title: "Review figures · Return Assistant" };
+// The model, documents and reconciliation state can all change from another
+// step/tab — always read fresh.
 export const dynamic = "force-dynamic";
 
 /**
- * Placeholder for step 3 of the wizard (PRD §7 step 5 / FR-7, FR-21, FR-22). A
- * later task replaces this with the real review-and-confirm screen — showing
- * every proposed figure with its source and confidence, and resolving the
- * `pendingReconciliation` T16 stashed on the model (see
- * `lib/extraction-scratch.ts`). It exists now so T16's "Extract figures" has
- * somewhere in-scope to land.
+ * Step 3 of the wizard (PRD FR-7, FR-20, FR-21, FR-24, §7 step 5) — the heart
+ * of the app: every proposed figure is confirmed here before the return can
+ * proceed. Runs `detectOutOfScope` first; a blocked return gets the hard-stop
+ * screen instead of the review UI, with no way to continue (FR-20).
+ *
+ * `documents` (filename + detected type) are trivially at hand here and are
+ * passed to the detector, but T11's Claude content-classification pass
+ * (`checkDocumentForOutOfScopeContent` in `@aus-tax-lodge/scope`) is not yet
+ * wired into the extraction pipeline, so `contentFindings` is not available —
+ * a document whose *content* implies an out-of-scope item (e.g. a "dividend
+ * statement" that's actually a trust distribution) is not yet caught here.
+ * Follow-up for whichever task wires T11's extraction run to that check.
  */
 export default async function ReviewPage({
   params,
@@ -26,35 +42,77 @@ export default async function ReviewPage({
 }) {
   const { returnId } = await params;
 
-  let targetYear: string;
+  let loaded: Awaited<ReturnType<typeof loadReturnModel>>;
+  let documents: Awaited<ReturnType<ReturnType<typeof getDocumentStore>["listDocuments"]>>;
   try {
-    const loaded = await loadReturnModel(returnId);
-    targetYear = loaded.envelope.targetYear;
+    loaded = await loadReturnModel(returnId);
+    documents = await getDocumentStore().listDocuments(returnId);
   } catch {
     notFound();
   }
+  const { envelope, readOnly, model } = loaded;
+
+  const findings = detectOutOfScope({
+    model,
+    documents: documents.map((d) => ({
+      docId: d.docId,
+      detectedType: d.detectedType,
+      filename: d.filename,
+    })),
+  });
+
+  const context = `${model.taxpayer.fullName.value ?? "New return"} · ${formatIncomeYear(envelope.targetYear)}`;
+
+  if (isBlocked(findings)) {
+    return (
+      <>
+        <TopBar context={context}>
+          <Link href="/" className={buttonClassName({ variant: "ghost", size: "sm" })}>
+            Save &amp; exit
+          </Link>
+        </TopBar>
+        <WizardSteps current="review" />
+        <OutOfScopeReviewStop returnId={returnId} findings={findings} />
+      </>
+    );
+  }
+
+  const documentsByDocId = Object.fromEntries(documents.map((d) => [d.docId, d.filename]));
 
   return (
     <>
-      <TopBar context={`New return · ${formatIncomeYear(targetYear)}`}>
+      <TopBar context={context}>
         <Link href="/" className={buttonClassName({ variant: "ghost", size: "sm" })}>
           Save &amp; exit
         </Link>
       </TopBar>
       <WizardSteps current="review" />
 
-      <main className="mx-auto max-w-3xl px-6 py-10 md:px-10">
-        <h1 className="text-pretty font-serif text-2xl">Review your figures — coming next</h1>
+      <main className="mx-auto max-w-4xl px-6 py-8 md:px-10">
+        <h1 className="text-pretty font-serif text-2xl">Review the figures</h1>
         <p className="mt-2 text-sm text-muted">
-          Confirming proposed figures, resolving mismatches between sources, and the rental
-          schedule are built in a later task.
+          Confirm every figure. Each one shows where it came from — open the source to check anything
+          you&rsquo;re unsure of.
         </p>
-        <Link
-          href={`/returns/${returnId}/documents`}
-          className={`mt-6 ${buttonClassName({ variant: "default" })}`}
-        >
-          Back to documents
-        </Link>
+
+        <div className="mt-5">
+          {readOnly ? (
+            <ReviewReadOnly
+              data={buildReviewData(
+                model,
+                readExtractionScratch(model).pendingReconciliation,
+                documentsByDocId,
+              )}
+            />
+          ) : (
+            <ReviewSections
+              returnId={returnId}
+              initialModel={model}
+              initialRevision={envelope.revision}
+              documentsByDocId={documentsByDocId}
+            />
+          )}
+        </div>
       </main>
     </>
   );
