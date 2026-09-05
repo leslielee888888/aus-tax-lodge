@@ -7,7 +7,8 @@
  * extractions target the same `modelPath` with different values, the first
  * one (in pre-fill-report-first order — FR-2) is applied and every candidate
  * is recorded in `pendingReconciliation`; this module never picks a winner
- * on the user's behalf (FR-21) — that's `T12`'s job.
+ * on the user's behalf (FR-21) — see `./reconcile` for the resolution
+ * mechanism the user's pick drives.
  */
 import { documentOrigin, type ReturnModel } from "@aus-tax-lodge/model";
 
@@ -36,6 +37,7 @@ function toCandidate(
 ): ReconciliationCandidate {
   return {
     docId: extraction.docId,
+    documentType: extraction.documentType,
     page: figure.page,
     snippet: figure.snippet,
     confidence: figure.confidence,

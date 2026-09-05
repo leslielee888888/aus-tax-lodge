@@ -34,6 +34,8 @@ export interface DocumentExtractionResult {
 /** One candidate value for a `modelPath` that two or more documents disagree on. */
 export interface ReconciliationCandidate {
   readonly docId: string;
+  /** The candidate's source document type — lets a picker (and {@link import("./reconcile").suggestDefaultChoice}) find the ATO pre-fill report among the candidates (PRD FR-21). */
+  readonly documentType: DocumentType;
   readonly page: number;
   readonly snippet: string;
   readonly confidence: FieldConfidence;
@@ -44,9 +46,19 @@ export interface ReconciliationCandidate {
  * A `modelPath` two or more extractions proposed different values for (PRD
  * FR-21). Never auto-resolved here — {@link import("./apply").applyExtractions}
  * leaves the field at whichever candidate landed first (pre-fill-report-first,
- * PRD FR-2) and surfaces every candidate for a later task to reconcile.
+ * PRD FR-2) and surfaces every candidate for {@link import("./reconcile").resolveReconciliation}
+ * to resolve once the user has picked.
  */
 export interface PendingReconciliation {
   readonly modelPath: string;
   readonly candidates: readonly ReconciliationCandidate[];
+}
+
+/**
+ * The user's pick for one {@link PendingReconciliation} (PRD FR-21):
+ * `chosenIndex` indexes into that entry's `candidates`.
+ */
+export interface ReconciliationChoice {
+  readonly modelPath: string;
+  readonly chosenIndex: number;
 }
