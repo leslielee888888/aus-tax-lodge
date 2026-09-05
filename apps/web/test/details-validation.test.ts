@@ -1,7 +1,7 @@
+import { isValidTfn } from "@aus-tax-lodge/validation";
 import { describe, expect, it } from "vitest";
 
 import {
-  isValidTfnChecksum,
   normalizeBsb,
   parseDdMmYyyyToIso,
   validateAccountNumber,
@@ -14,26 +14,29 @@ import {
   validateTfn,
 } from "../lib/details/validation";
 
+// The checksum itself is `@aus-tax-lodge/validation`'s (T8); these tests only
+// exercise this form's wrapping (required / length / message conventions).
 describe("TFN checksum (PRD FR-1)", () => {
   it("accepts a valid ATO test TFN", () => {
     // The same test TFN used by packages/model/test/fixtures.ts.
-    expect(isValidTfnChecksum("123456782")).toBe(true);
+    expect(isValidTfn("123456782")).toBe(true);
   });
 
   it("rejects a TFN with a bad checksum digit", () => {
-    expect(isValidTfnChecksum("123456781")).toBe(false);
+    expect(isValidTfn("123456781")).toBe(false);
   });
 
-  it("rejects a non-9-digit string", () => {
-    expect(isValidTfnChecksum("12345678")).toBe(false);
-    expect(isValidTfnChecksum("1234567823")).toBe(false);
+  it("accepts a valid 8-digit TFN and rejects a 10-digit string", () => {
+    expect(isValidTfn("12345677")).toBe(true);
+    expect(isValidTfn("1234567823")).toBe(false);
   });
 
   it("validateTfn reports each failure distinctly", () => {
     expect(validateTfn("")).toMatch(/required/i);
-    expect(validateTfn("12345678")).toMatch(/9 digits/i);
+    expect(validateTfn("1234567")).toMatch(/8 or 9 digits/i);
     expect(validateTfn("123456781")).toMatch(/check/i);
     expect(validateTfn("123 456 782")).toBeNull();
+    expect(validateTfn("123 456 77")).toBeNull();
   });
 });
 

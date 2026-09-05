@@ -10,6 +10,7 @@ const nextConfig: NextConfig = {
     "@aus-tax-lodge/model",
     "@aus-tax-lodge/params",
     "@aus-tax-lodge/store",
+    "@aus-tax-lodge/validation",
   ],
 };
 

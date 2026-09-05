@@ -3,7 +3,14 @@
  * Next, no filesystem — shared verbatim between the client (immediate,
  * on-blur / on-submit feedback) and the server action (the authoritative
  * re-check, since a client can always be bypassed).
+ *
+ * The TFN and BSB checks themselves live in `@aus-tax-lodge/validation`
+ * (T8) — that is the canonical implementation (it also accepts 8-digit
+ * TFNs, which the checksum here originally rejected). This module wraps
+ * them with the label/required/error-message conventions this form uses.
  */
+
+import { isValidBsb, isValidTfn } from "@aus-tax-lodge/validation";
 
 // ---------------------------------------------------------------------------
 // Small parsing helpers
@@ -77,25 +84,11 @@ export function validatePostcode(raw: string): string | null {
   return /^\d{4}$/.test(raw.trim()) ? null : "Postcode must be 4 digits";
 }
 
-/**
- * The ATO tax file number checksum: each of the 9 digits is weighted
- * `1,4,3,7,5,8,6,9,10` and the weighted sum must be divisible by 11.
- */
-export function isValidTfnChecksum(nineDigits: string): boolean {
-  if (!/^\d{9}$/.test(nineDigits)) return false;
-  const weights = [1, 4, 3, 7, 5, 8, 6, 9, 10];
-  const sum = nineDigits
-    .split("")
-    .reduce((total, digit, i) => total + Number(digit) * weights[i]!, 0);
-  return sum % 11 === 0;
-}
-
 export function validateTfn(raw: string): string | null {
   const digits = digitsOnly(raw);
   if (!digits) return "Tax file number is required";
-  if (digits.length !== 9) return "Tax file number must be 9 digits";
-  if (!isValidTfnChecksum(digits))
-    return "That tax file number doesn’t check out — check the digits";
+  if (digits.length !== 8 && digits.length !== 9) return "Tax file number must be 8 or 9 digits";
+  if (!isValidTfn(digits)) return "That tax file number doesn’t check out — check the digits";
   return null;
 }
 
@@ -107,7 +100,7 @@ export function normalizeBsb(raw: string): string {
 
 export function validateBsb(raw: string): string | null {
   if (!raw.trim()) return "BSB is required";
-  return /^\d{3}-?\d{3}$/.test(raw.trim()) ? null : "BSB must be 6 digits, as NNN-NNN";
+  return isValidBsb(raw) ? null : "BSB must be 6 digits, as NNN-NNN";
 }
 
 export function validateAccountNumber(raw: string): string | null {
