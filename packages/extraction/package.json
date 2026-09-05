@@ -1,0 +1,27 @@
+{
+  "name": "@aus-tax-lodge/extraction",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@aus-tax-lodge/ai": "*",
+    "@aus-tax-lodge/model": "*",
+    "@aus-tax-lodge/store": "*",
+    "unpdf": "^1.8.1"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "eslint src test"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "typescript": "^5.6.3",
+    "vitest": "^3.2.7"
+  }
+}
