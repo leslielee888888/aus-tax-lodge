@@ -4,10 +4,11 @@ import { walkProvenancedFields } from "@aus-tax-lodge/validation";
 import { describe, expect, it } from "vitest";
 
 import { assembleExportPackage } from "../src/assemble";
+import { DISCLAIMER_PARAGRAPH, DISCLAIMER_SENTENCES } from "../src/disclaimer";
 import { buildReturnJson } from "../src/json";
 import { buildLodgeInstructions } from "../src/lodge-instructions";
 import { buildReturnPdf } from "../src/pdf";
-import { renderReturnPdfText } from "../src/pdf-text";
+import { renderReturnPdfLines, renderReturnPdfText } from "../src/pdf-text";
 import { buildSourceIndex, renderSourceIndexText } from "../src/source-index";
 import {
   buildValidationReport,
@@ -70,6 +71,34 @@ describe.each(CASES)("$name", ({ model: makeModel }) => {
       expect(json.labels["21"]).toBeUndefined();
       expect(json.rentalSchedule).toBeNull();
     }
+  });
+
+  it("opens with the FR-19 disclaimer on the cover page, and repeats it in the JSON meta", async () => {
+    // Every canonical sentence is on the rendered PDF, ahead of the first return figure.
+    const firstLabelCode = view.sections[0]!.labels[0]!.code;
+    const figuresAt = pdfText.indexOf(`Return figures, in myTax on-screen order`);
+    for (const sentence of DISCLAIMER_SENTENCES) {
+      expect(pdfText).toContain(sentence);
+      expect(pdfText.indexOf(sentence)).toBeLessThan(figuresAt);
+    }
+    expect(pdfText).toContain("Important — please read before you lodge");
+    expect(pdfText.indexOf("read before you lodge")).toBeLessThan(pdfText.indexOf(firstLabelCode));
+
+    // The cover disclaimer sits on its own page (a page break precedes the taxpayer block).
+    const pdfLines = renderReturnPdfLines(input);
+    const breakIndex = pdfLines.findIndex((l) => l.style === "pagebreak");
+    const taxpayerIndex = pdfLines.findIndex((l) => l.text === "Taxpayer");
+    expect(breakIndex).toBeGreaterThan(0);
+    expect(breakIndex).toBeLessThan(taxpayerIndex);
+
+    expect(json.meta.disclaimer).toBe(DISCLAIMER_PARAGRAPH);
+    for (const sentence of DISCLAIMER_SENTENCES) {
+      expect(json.meta.disclaimer).toContain(sentence);
+    }
+
+    const pkg = await assembleExportPackage(input);
+    const parsed = JSON.parse(Buffer.from(pkg.json.bytes).toString("utf8"));
+    expect(parsed.meta.disclaimer).toBe(DISCLAIMER_PARAGRAPH);
   });
 
   it("source index has a resolvable-origin entry for every dollar figure on the return", () => {

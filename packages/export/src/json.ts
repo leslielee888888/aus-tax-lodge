@@ -6,6 +6,7 @@
  * full engine assessment. Derived from the same {@link buildReturnView} the PDF
  * uses, so the two can never disagree.
  */
+import { DISCLAIMER_PARAGRAPH } from "./disclaimer";
 import { buildReturnView } from "./view";
 import type { ExportPackageInput } from "./types";
 
@@ -38,11 +39,6 @@ export interface ReturnJson {
 
 type ReturnView = ReturnType<typeof buildReturnView>;
 
-const DISCLAIMER =
-  "Prepared with a self-hosted assistant. Not tax advice. The figures are an " +
-  "estimate, not the ATO's assessment. You are responsible for what you lodge. " +
-  "No information was transmitted to the ATO.";
-
 /** Build the label-keyed JSON object (PRD FR-14 b). */
 export function buildReturnJson(input: ExportPackageInput): ReturnJson {
   const view = buildReturnView(input);
@@ -70,7 +66,7 @@ export function buildReturnJson(input: ExportPackageInput): ReturnJson {
       targetYear: view.targetYear,
       paramsVersion: view.paramsVersion,
       generatedAt: view.generatedAt,
-      disclaimer: DISCLAIMER,
+      disclaimer: DISCLAIMER_PARAGRAPH,
       atoTransmission: "none",
     },
     taxpayer: view.taxpayer,

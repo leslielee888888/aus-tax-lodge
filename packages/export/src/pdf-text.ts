@@ -7,22 +7,25 @@
  * Layout follows the myTax on-screen section order (from the taxonomy), so a
  * user can transcribe the return top to bottom.
  */
+import { DISCLAIMER_SENTENCES } from "./disclaimer";
 import { formatDollars } from "./money";
 import type { ExportPackageInput, ReturnView } from "./types";
 import { buildReturnView } from "./view";
 
-export type PdfLineStyle = "title" | "h1" | "h2" | "label" | "detail" | "body" | "spacer";
+export type PdfLineStyle =
+  | "title"
+  | "h1"
+  | "h2"
+  | "label"
+  | "detail"
+  | "body"
+  | "spacer"
+  | "pagebreak";
 
 export interface PdfLine {
   readonly text: string;
   readonly style: PdfLineStyle;
 }
-
-const DISCLAIMER_LINES = [
-  "Not a registered tax agent. This is a self-preparation aid, not tax advice.",
-  "The estimate is not the ATO's assessment. You are responsible for what you lodge.",
-  "Nothing in this package was transmitted to the ATO — you lodge it yourself in myTax.",
-];
 
 function push(lines: PdfLine[], style: PdfLineStyle, text = ""): void {
   lines.push({ text, style });
@@ -113,6 +116,7 @@ export function renderReturnPdfLines(input: ExportPackageInput): PdfLine[] {
   const view = buildReturnView(input);
   const lines: PdfLine[] = [];
 
+  // --- Cover page (PRD FR-19 — the disclaimer opens the package) ------------
   push(lines, "title", `Tax return ${view.targetYear} — lodgement summary`);
   push(
     lines,
@@ -120,8 +124,15 @@ export function renderReturnPdfLines(input: ExportPackageInput): PdfLine[] {
     `Prepared ${view.generatedAt.slice(0, 10)} · tax-parameter set ${view.paramsVersion}`,
   );
   push(lines, "spacer");
-  for (const line of DISCLAIMER_LINES) push(lines, "body", line);
+  push(lines, "h2", "Important — please read before you lodge");
+  for (const sentence of DISCLAIMER_SENTENCES) push(lines, "body", sentence);
   push(lines, "spacer");
+  push(
+    lines,
+    "body",
+    "Keep this package with your records. The ATO expects you to keep your tax records for five years — the encrypted records archive you downloaded is your retention copy.",
+  );
+  push(lines, "pagebreak");
 
   taxpayerBlock(lines, view);
 

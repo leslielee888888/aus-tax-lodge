@@ -6,6 +6,13 @@ import { EXTRACTABLE_DOCUMENT_PROMPTS } from "../src/prompts";
 const INCOME_STATEMENT_PROMPT = EXTRACTABLE_DOCUMENT_PROMPTS["income-statement"]!;
 const DIVIDEND_PROMPT = EXTRACTABLE_DOCUMENT_PROMPTS["dividend-statement"]!;
 
+describe("extraction system prompt", () => {
+  it("tells the model this step does not give tax advice (FR-19)", () => {
+    expect(INCOME_STATEMENT_PROMPT.system).toContain("does not give tax advice");
+    expect(DIVIDEND_PROMPT.system).toContain("does not give tax advice");
+  });
+});
+
 describe("parseExtractedFigures", () => {
   it("parses a clean JSON array", () => {
     const reply = JSON.stringify([

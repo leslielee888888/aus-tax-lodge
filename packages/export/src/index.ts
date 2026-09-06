@@ -22,6 +22,15 @@ export type {
   ReturnViewTaxpayer,
 } from "./types";
 
+export {
+  ACKNOWLEDGEMENT_STATEMENT,
+  ASSISTANT_DOES,
+  ASSISTANT_DOES_NOT,
+  DISCLAIMER_BANNER_POINTS,
+  DISCLAIMER_PARAGRAPH,
+  DISCLAIMER_SENTENCES,
+} from "./disclaimer";
+
 export { formatDollars, sumToCents } from "./money";
 export { buildReturnView } from "./view";
 

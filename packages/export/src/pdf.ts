@@ -31,6 +31,7 @@ const STYLES: Readonly<Record<PdfLineStyle, StyleSpec>> = {
   detail: { size: 8.5, bold: false, gapBefore: 0, color: [0.4, 0.36, 0.32] },
   body: { size: 9, bold: false, gapBefore: 0, color: [0.3, 0.27, 0.24] },
   spacer: { size: 6, bold: false, gapBefore: 0, color: [1, 1, 1] },
+  pagebreak: { size: 0, bold: false, gapBefore: 0, color: [1, 1, 1] },
 };
 
 const LINE_HEIGHT = 1.38;
@@ -103,6 +104,11 @@ export async function buildReturnPdf(input: ExportPackageInput): Promise<Uint8Ar
   };
 
   for (const line of lines as PdfLine[]) {
+    if (line.style === "pagebreak") {
+      newPage();
+      continue;
+    }
+
     const spec = STYLES[line.style];
     const font = spec.bold ? bold : regular;
 

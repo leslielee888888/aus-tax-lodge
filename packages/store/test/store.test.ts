@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -158,6 +158,24 @@ describe("deletion", () => {
 
   it("deleteReturn on an unknown return is a no-op", async () => {
     await expect(store.deleteReturn("ghost")).resolves.toBeUndefined();
+  });
+
+  it("deleteReturn also removes the T20 export/ subdirectory and its artifacts (PRD FR-18)", async () => {
+    await store.putDocument("ret1", {
+      filename: "a.pdf",
+      mimeType: "application/pdf",
+      bytes: PDF,
+    });
+    // Simulate T20's persisted (encrypted-at-rest) export package.
+    const exportSubdir = join(dataDir, "returns", "ret1", "export");
+    await mkdir(exportSubdir, { recursive: true });
+    await writeFile(join(exportSubdir, "manifest.json"), "encrypted-manifest-bytes");
+    await writeFile(join(exportSubdir, "return-data-2025-26.json"), "encrypted-json-bytes");
+
+    await store.deleteReturn("ret1");
+
+    await expect(stat(exportSubdir)).rejects.toThrow();
+    await expect(stat(join(dataDir, "returns", "ret1"))).rejects.toThrow();
   });
 });
 

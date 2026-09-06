@@ -4,8 +4,10 @@ import { notFound } from "next/navigation";
 
 import { buttonClassName } from "../../../../components/Button";
 import { FileIcon } from "../../../../components/icons";
+import { PurgedDocumentsNotice } from "../../../../components/PurgedDocumentsNotice";
 import { TopBar } from "../../../../components/TopBar";
 import { WizardSteps } from "../../../../components/WizardSteps";
+import { readExportManifest } from "../../../../lib/export/persist";
 import { readExtractionScratch } from "../../../../lib/extraction-scratch";
 import { formatIncomeYear } from "../../../../lib/format";
 import { loadReturnModel } from "../../../../lib/returns";
@@ -23,11 +25,7 @@ export const dynamic = "force-dynamic";
  * interactive upload / classify / extract flow, or {@link DocumentsReadOnly}
  * for a return that's read-only under FR-16.
  */
-export default async function DocumentsPage({
-  params,
-}: {
-  params: Promise<{ returnId: string }>;
-}) {
+export default async function DocumentsPage({ params }: { params: Promise<{ returnId: string }> }) {
   const { returnId } = await params;
 
   let loaded: Awaited<ReturnType<typeof loadReturnModel>>;
@@ -40,10 +38,13 @@ export default async function DocumentsPage({
   }
   const { envelope, readOnly, model } = loaded;
   const scratch = readExtractionScratch(model);
+  const purgedAt = (await readExportManifest(returnId).catch(() => null))?.sourceDocumentsPurgedAt;
 
   return (
     <>
-      <TopBar context={`${model.taxpayer.fullName.value ?? "New return"} · ${formatIncomeYear(envelope.targetYear)}`}>
+      <TopBar
+        context={`${model.taxpayer.fullName.value ?? "New return"} · ${formatIncomeYear(envelope.targetYear)}`}
+      >
         <Link href="/" className={buttonClassName({ variant: "ghost", size: "sm" })}>
           Save &amp; exit
         </Link>
@@ -55,6 +56,12 @@ export default async function DocumentsPage({
         <p className="mt-2 text-sm text-muted">
           Drag files in below. We read each one and propose the figures — you confirm them next.
         </p>
+
+        {purgedAt ? (
+          <div className="mt-5">
+            <PurgedDocumentsNotice purgedAt={purgedAt} />
+          </div>
+        ) : null}
 
         <div className="mt-5 flex items-start gap-3 rounded-[10px] border border-border bg-accent-soft p-4">
           <span

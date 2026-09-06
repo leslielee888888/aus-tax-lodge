@@ -45,9 +45,11 @@ describe("classifyDocument", () => {
   it("passes the document as a PDF vision part with the filename in the prompt", async () => {
     const client = stubClient("income-statement");
     await classifyDocument({ ...PREFILL_FIXTURE, filename: "myEmployer.pdf" }, client);
-    const [parts, prompt] = vi.mocked(client.askVision).mock.calls[0]!;
+    const [parts, prompt, options] = vi.mocked(client.askVision).mock.calls[0]!;
     expect(parts[0]).toMatchObject({ kind: "pdf", mimeType: "application/pdf" });
     expect(prompt).toContain("myEmployer.pdf");
+    // FR-19: classification is not an advice step.
+    expect(options?.system).toContain("does not give tax advice");
   });
 
   it("treats png/jpg uploads as image parts", async () => {

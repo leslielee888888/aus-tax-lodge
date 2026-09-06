@@ -1,18 +1,30 @@
 import { PARAMS_VERSION, TARGET_YEAR } from "@aus-tax-lodge/params";
 import type { ReturnSummary } from "@aus-tax-lodge/store";
 
+import Link from "next/link";
+
+import { buttonClassName } from "../components/Button";
 import { Card } from "../components/Card";
-import { LockIcon } from "../components/icons";
+import { GearIcon, LockIcon } from "../components/icons";
 import { NewReturnButton } from "../components/NewReturnButton";
 import { ReturnsList } from "../components/ReturnsList";
 import { TopBar } from "../components/TopBar";
 import { formatIncomeYear } from "../lib/format";
+import { maybePurgeExportedDocuments } from "../lib/purge";
 import { getReturnRepository } from "../lib/returns";
 
 // Read fresh on every request — a return the user just created must show up.
 export const dynamic = "force-dynamic";
 
 export default async function ReturnsPage() {
+  // Lazy FR-18 retention sweep — deduped to at most once per process per 15 min,
+  // and a no-op unless the per-instance purge toggle is on.
+  try {
+    await maybePurgeExportedDocuments();
+  } catch (error) {
+    console.error("retention sweep failed", error);
+  }
+
   let returns: ReturnSummary[] | null = null;
   try {
     returns = await getReturnRepository().listReturns();
@@ -27,6 +39,10 @@ export default async function ReturnsPage() {
           <LockIcon className="size-3" aria-hidden="true" />
           Unlocked
         </span>
+        <Link href="/settings" className={buttonClassName({ variant: "ghost", size: "sm" })}>
+          <GearIcon className="size-3.5" aria-hidden="true" />
+          Settings
+        </Link>
       </TopBar>
 
       <main className="mx-auto max-w-3xl px-6 py-8 md:px-10">
@@ -34,8 +50,8 @@ export default async function ReturnsPage() {
           <div className="min-w-0">
             <h1 className="text-pretty font-serif text-2xl">Your returns</h1>
             <p className="mt-1 text-xs text-muted">
-              Prepare a return for the {formatIncomeYear(TARGET_YEAR)} income year — for you, or
-              for a household member in the same place.
+              Prepare a return for the {formatIncomeYear(TARGET_YEAR)} income year — for you, or for
+              a household member in the same place.
             </p>
           </div>
           <NewReturnButton />
@@ -56,9 +72,9 @@ export default async function ReturnsPage() {
         )}
 
         <p className="mt-4 text-[11px] leading-relaxed text-muted">
-          Returns and documents are stored encrypted on this device. Deleting a return removes
-          every document and figure under it. Past-year returns open read-only once the tax
-          rules roll forward. Parameter set {PARAMS_VERSION}.
+          Returns and documents are stored encrypted on this device. Deleting a return removes every
+          document and figure under it. Past-year returns open read-only once the tax rules roll
+          forward. Parameter set {PARAMS_VERSION}.
         </p>
       </main>
     </>

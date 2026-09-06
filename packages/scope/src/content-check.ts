@@ -42,7 +42,8 @@ export const SCOPE_CONTENT_CHECK_SYSTEM_PROMPT =
   "Australian franked/unfranked dividends, taxable government allowances, standard " +
   "work-related deductions, and ONE solely-owned long-term residential rental property. " +
   "You are shown exactly one uploaded document. Decide only whether it evidences something " +
-  "OUTSIDE that scope. Reply with a JSON array and nothing else.";
+  "OUTSIDE that scope. This step does not give tax advice and makes no recommendation — " +
+  "it only flags out-of-scope content. Reply with a JSON array and nothing else.";
 
 export const SCOPE_CONTENT_CHECK_PROMPT = `Does this document contain, report or evidence ANY of the following? Each one is OUT OF SCOPE and must stop the return:
 

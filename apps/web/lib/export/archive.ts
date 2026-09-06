@@ -87,12 +87,21 @@ export async function buildRecordsArchive(
   const pkg = await assembleExportPackage(input);
   const lodgeNote = buildLodgeInstructions(input);
   const store = getDocumentStore();
-  const documents = await Promise.all(
-    input.documents.map(async (ref) => {
-      const stored = await store.getDocument(returnId, ref.docId);
-      return { filename: ref.filename, bytes: stored.bytes };
-    }),
-  );
+  const documents = (
+    await Promise.all(
+      input.documents.map(async (ref) => {
+        try {
+          const stored = await store.getDocument(returnId, ref.docId);
+          return { filename: ref.filename, bytes: stored.bytes };
+        } catch {
+          // The source document was purged by the FR-18 retention sweep — the
+          // archive the user already downloaded is their retention copy. Skip it
+          // rather than fail the (re-)build.
+          return null;
+        }
+      }),
+    )
+  ).filter((doc): doc is { filename: string; bytes: Buffer } => doc !== null);
 
   const options = {
     zlib: { level: 9 },
