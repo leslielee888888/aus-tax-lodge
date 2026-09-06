@@ -34,6 +34,13 @@ export interface ExportManifest {
   readonly generatedAt: string;
   readonly paramsVersion: string;
   readonly artifacts: readonly ExportManifestEntry[];
+  /**
+   * ISO-8601 instant the lazy retention sweep (PRD FR-18) deleted this return's
+   * source documents. Set only when the per-instance purge toggle is on and the
+   * export is older than its window. The return, its `return.json` and these
+   * persisted export artifacts are all kept — only the original uploads go.
+   */
+  readonly sourceDocumentsPurgedAt?: string;
 }
 
 const ARTIFACT_KEYS: readonly (keyof ExportPackage)[] = [
@@ -130,6 +137,26 @@ export async function readPersistedArtifact(
     contentType: entry.contentType,
     bytes: decrypt(config.encryptionKey, blob),
   };
+}
+
+/**
+ * Record on the persisted export manifest that this return's source documents
+ * were purged by the FR-18 retention sweep, and when. Returns the updated
+ * manifest, or `null` if there is no manifest to stamp.
+ */
+export async function markSourceDocumentsPurged(
+  returnId: string,
+  purgedAt: string,
+): Promise<ExportManifest | null> {
+  const manifest = await readExportManifest(returnId);
+  if (!manifest) return null;
+  const updated: ExportManifest = { ...manifest, sourceDocumentsPurgedAt: purgedAt };
+  const config = getServerConfig();
+  await writeFile(
+    exportArtifactPath(config.dataDir, returnId, MANIFEST_NAME),
+    encryptJson(config.encryptionKey, updated),
+  );
+  return updated;
 }
 
 /** Stamp the return `status: "exported"` (PRD FR-14). No-op if already exported or read-only. */

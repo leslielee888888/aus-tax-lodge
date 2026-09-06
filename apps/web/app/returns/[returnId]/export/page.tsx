@@ -17,6 +17,7 @@ import {
   InfoIcon,
   ListIcon,
 } from "../../../../components/icons";
+import { PurgedDocumentsNotice } from "../../../../components/PurgedDocumentsNotice";
 import { TopBar } from "../../../../components/TopBar";
 import { WizardSteps } from "../../../../components/WizardSteps";
 import { readAcknowledgedWarningIds } from "../../../../lib/export/acknowledgements";
@@ -250,6 +251,7 @@ export default async function ExportPage({ params }: { params: Promise<{ returnI
   const input = buildExportInput(context, acknowledgedWarningIds, new Date().toISOString());
   const report = buildValidationReport(input);
   const lodge = buildLodgeInstructionsData(input);
+  const purgedAt = (await readExportManifest(returnId).catch(() => null))?.sourceDocumentsPurgedAt;
 
   const allWarningsAcknowledged = report.warnings.every((w) => w.acknowledged);
   const downloadsEnabled = !report.exportBlocked && allWarningsAcknowledged;
@@ -269,6 +271,12 @@ export default async function ExportPage({ params }: { params: Promise<{ returnI
         <p className="mt-1 text-xs text-muted">
           Last checks, then your package. Nothing is sent to the ATO — you lodge in myTax.
         </p>
+
+        {purgedAt ? (
+          <div className="mt-4">
+            <PurgedDocumentsNotice purgedAt={purgedAt} />
+          </div>
+        ) : null}
 
         <div className="mt-5 flex flex-col gap-4">
           {/* --- Checks (PRD FR-13) --- */}

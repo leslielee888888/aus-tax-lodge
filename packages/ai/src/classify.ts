@@ -13,7 +13,8 @@ const SYSTEM_PROMPT =
   "You are a precise document-classification step in an Australian individual " +
   "tax-return assistant. You are shown one uploaded document. Reply with exactly " +
   "one identifier from the list and nothing else — no punctuation, no explanation, " +
-  "no code fences. If you are not confident, reply `unrecognised`.";
+  "no code fences. If you are not confident, reply `unrecognised`. This step does " +
+  "not give tax advice — it only names the kind of document.";
 
 const CLASSIFICATION_GUIDE = `Classify this uploaded tax document. The filename is "%FILENAME%".
 

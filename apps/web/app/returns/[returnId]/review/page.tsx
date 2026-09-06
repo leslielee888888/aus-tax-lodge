@@ -5,8 +5,10 @@ import { notFound } from "next/navigation";
 import { detectOutOfScope, isBlocked } from "@aus-tax-lodge/scope";
 
 import { buttonClassName } from "../../../../components/Button";
+import { PurgedDocumentsNotice } from "../../../../components/PurgedDocumentsNotice";
 import { TopBar } from "../../../../components/TopBar";
 import { WizardSteps } from "../../../../components/WizardSteps";
+import { readExportManifest } from "../../../../lib/export/persist";
 import { readExtractionScratch } from "../../../../lib/extraction-scratch";
 import { formatIncomeYear } from "../../../../lib/format";
 import { buildReviewData } from "../../../../lib/review/build-sections";
@@ -35,11 +37,7 @@ export const dynamic = "force-dynamic";
  * statement" that's actually a trust distribution) is not yet caught here.
  * Follow-up for whichever task wires T11's extraction run to that check.
  */
-export default async function ReviewPage({
-  params,
-}: {
-  params: Promise<{ returnId: string }>;
-}) {
+export default async function ReviewPage({ params }: { params: Promise<{ returnId: string }> }) {
   const { returnId } = await params;
 
   let loaded: Awaited<ReturnType<typeof loadReturnModel>>;
@@ -78,6 +76,7 @@ export default async function ReviewPage({
   }
 
   const documentsByDocId = Object.fromEntries(documents.map((d) => [d.docId, d.filename]));
+  const purgedAt = (await readExportManifest(returnId).catch(() => null))?.sourceDocumentsPurgedAt;
 
   return (
     <>
@@ -91,9 +90,15 @@ export default async function ReviewPage({
       <main className="mx-auto max-w-4xl px-6 py-8 md:px-10">
         <h1 className="text-pretty font-serif text-2xl">Review the figures</h1>
         <p className="mt-2 text-sm text-muted">
-          Confirm every figure. Each one shows where it came from — open the source to check anything
-          you&rsquo;re unsure of.
+          Confirm every figure. Each one shows where it came from — open the source to check
+          anything you&rsquo;re unsure of.
         </p>
+
+        {purgedAt ? (
+          <div className="mt-5">
+            <PurgedDocumentsNotice purgedAt={purgedAt} />
+          </div>
+        ) : null}
 
         <div className="mt-5">
           {readOnly ? (

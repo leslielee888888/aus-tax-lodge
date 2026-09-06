@@ -1,5 +1,6 @@
 "use client";
 
+import { ACKNOWLEDGEMENT_STATEMENT } from "@aus-tax-lodge/export/disclaimer";
 import Link from "next/link";
 import { useActionState, useId } from "react";
 
@@ -25,9 +26,7 @@ export function AcknowledgeGate() {
             aria-describedby={state.error ? errorId : undefined}
             className="mt-0.5 size-[18px] shrink-0 accent-accent"
           />
-          <span>
-            I understand this is not tax advice and I am responsible for what I lodge.
-          </span>
+          <span>{ACKNOWLEDGEMENT_STATEMENT}</span>
         </label>
       </div>
 

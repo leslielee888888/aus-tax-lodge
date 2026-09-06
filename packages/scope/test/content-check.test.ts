@@ -62,9 +62,11 @@ describe("checkDocumentForOutOfScopeContent", () => {
       filename: "managed-fund.pdf",
       categories: ["trust-partnership-managed-fund-distribution"],
     });
-    const [parts, prompt] = vi.mocked(client.askVision).mock.calls[0]!;
+    const [parts, prompt, options] = vi.mocked(client.askVision).mock.calls[0]!;
     expect(parts).toEqual([PART]);
     expect(prompt).toBe(SCOPE_CONTENT_CHECK_PROMPT);
+    // FR-19: the scope gate is not an advice step.
+    expect(options?.system).toContain("does not give tax advice");
   });
 
   it("returns no categories for an in-scope document", async () => {

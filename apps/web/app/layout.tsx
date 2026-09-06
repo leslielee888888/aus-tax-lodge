@@ -20,13 +20,15 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html
-      lang="en"
-      className={`${spectral.variable} ${plexSans.variable} ${plexMono.variable}`}
-    >
+    <html lang="en" className={`${spectral.variable} ${plexSans.variable} ${plexMono.variable}`}>
       <body className="min-h-screen bg-bg font-sans text-text antialiased">
+        <a href="#main-content" className="skip-link">
+          Skip to content
+        </a>
         <DisclaimerBanner />
-        {children}
+        <div id="main-content" tabIndex={-1} className="outline-none">
+          {children}
+        </div>
       </body>
     </html>
   );
