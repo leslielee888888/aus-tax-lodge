@@ -110,3 +110,29 @@ export function AlertTriangleIcon(props: IconProps) {
     </Icon>
   );
 }
+
+export function DownloadIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M12 3v13M7 12l5 5 5-5" />
+      <path d="M4 21h16" />
+    </Icon>
+  );
+}
+
+export function ListIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M4 6h16M4 12h16M4 18h10" />
+    </Icon>
+  );
+}
+
+export function ClipboardCheckIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M9 11l3 3 8-8" />
+      <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+    </Icon>
+  );
+}

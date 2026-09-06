@@ -16,6 +16,8 @@ export {
   documentBlobPath,
   documentMetaPath,
   documentsDir,
+  exportArtifactPath,
+  exportDir,
   returnDir,
   returnJsonPath,
   returnsRoot,
