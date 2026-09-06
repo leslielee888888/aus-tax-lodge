@@ -22,12 +22,19 @@
  *   spouseDob           → context.spouse.dateOfBirth (ISO)
  *   spouseIncome        → context.spouse.estimatedTaxableIncome
  *   spouseCoverDays     → context.spouse.privateHospitalCoverDays
+ *   hasRental           → rental.present
+ *   rentalAddressLine1  → rental.property.addressLine1
+ *   rentalSuburb        → rental.property.suburb
+ *   rentalState         → rental.property.state
+ *   rentalPostcode      → rental.property.postcode
+ *   rentalFirstEarnedOn → rental.property.firstEarnedIncomeOn (ISO)
  *
- * Every other section of the model (income, deductions, rental, private
- * health, questionnaire) is left untouched — this form only ever reads and
- * rewrites `taxpayer` and the non-rental parts of `context`.
+ * Income, deductions, private health and the questionnaire are left
+ * untouched. The rental schedule's *identity* (the six fields above) is now
+ * owned here (FR-24 / T25); its figures, the scope-gate booleans and the
+ * repairs gate are still set later (documents / questions / review).
  */
-import { answer, type ReturnModel } from "@aus-tax-lodge/model";
+import { answer, unsetField, type ReturnModel } from "@aus-tax-lodge/model";
 
 import {
   digitsOnly,
@@ -38,8 +45,10 @@ import {
   validateBsb,
   validateDayCount,
   validateDob,
+  validateAuState,
   validateNonNegativeAmount,
   validateNonNegativeInteger,
+  validatePastDate,
   validatePostcode,
   validateRequired,
   validateTfn,
@@ -68,6 +77,12 @@ export interface DetailsFormValues {
   readonly spouseDob: string; // DD/MM/YYYY
   readonly spouseIncome: string;
   readonly spouseCoverDays: string;
+  readonly hasRental: boolean;
+  readonly rentalAddressLine1: string;
+  readonly rentalSuburb: string;
+  readonly rentalState: string;
+  readonly rentalPostcode: string;
+  readonly rentalFirstEarnedOn: string; // DD/MM/YYYY
 }
 
 export type DetailsFieldErrors = Partial<Record<keyof DetailsFormValues, string>>;
@@ -95,6 +110,12 @@ export function emptyDetailsFormValues(): DetailsFormValues {
     spouseDob: "",
     spouseIncome: "",
     spouseCoverDays: "",
+    hasRental: false,
+    rentalAddressLine1: "",
+    rentalSuburb: "",
+    rentalState: "",
+    rentalPostcode: "",
+    rentalFirstEarnedOn: "",
   };
 }
 
@@ -106,6 +127,7 @@ export function detailsFormValuesFromModel(model: ReturnModel): DetailsFormValue
   const address = t.postalAddress.value;
   const account = t.refundAccount.value;
   const hasSpouse = c.spouse.status.value === "had-spouse";
+  const rentalProperty = model.rental.property;
 
   return {
     ...empty,
@@ -139,6 +161,14 @@ export function detailsFormValuesFromModel(model: ReturnModel): DetailsFormValue
       c.spouse.privateHospitalCoverDays.value != null
         ? String(c.spouse.privateHospitalCoverDays.value)
         : "",
+    hasRental: model.rental.present,
+    rentalAddressLine1: rentalProperty.addressLine1.value ?? "",
+    rentalSuburb: rentalProperty.suburb.value ?? "",
+    rentalState: rentalProperty.state.value ?? "",
+    rentalPostcode: rentalProperty.postcode.value ?? "",
+    rentalFirstEarnedOn: rentalProperty.firstEarnedIncomeOn.value
+      ? isoToDdMmYyyy(rentalProperty.firstEarnedIncomeOn.value)
+      : "",
   };
 }
 
@@ -166,6 +196,12 @@ export function parseDetailsFormData(formData: FormData): DetailsFormValues {
     spouseDob: str("spouseDob"),
     spouseIncome: str("spouseIncome"),
     spouseCoverDays: str("spouseCoverDays"),
+    hasRental: formData.get("hasRental") === "on",
+    rentalAddressLine1: str("rentalAddressLine1"),
+    rentalSuburb: str("rentalSuburb"),
+    rentalState: str("rentalState"),
+    rentalPostcode: str("rentalPostcode"),
+    rentalFirstEarnedOn: str("rentalFirstEarnedOn"),
   };
 }
 
@@ -205,6 +241,17 @@ export function validateDetailsForm(values: DetailsFormValues): DetailsFieldErro
     );
   }
 
+  if (values.hasRental) {
+    set("rentalAddressLine1", validateRequired(values.rentalAddressLine1, "Rental address line 1"));
+    set("rentalSuburb", validateRequired(values.rentalSuburb, "Rental suburb"));
+    set("rentalState", validateAuState(values.rentalState, "Rental state"));
+    set("rentalPostcode", validatePostcode(values.rentalPostcode));
+    set(
+      "rentalFirstEarnedOn",
+      validatePastDate(values.rentalFirstEarnedOn, "Date rental income was first earned"),
+    );
+  }
+
   return errors;
 }
 
@@ -223,6 +270,7 @@ export function applyDetailsToModel(model: ReturnModel, values: DetailsFormValue
 
   return {
     ...model,
+    rental: applyRentalIdentity(model, values),
     taxpayer: {
       fullName: answer(model.taxpayer.fullName, values.fullName),
       dateOfBirth: answer(model.taxpayer.dateOfBirth, dobIso),
@@ -275,5 +323,71 @@ export function applyDetailsToModel(model: ReturnModel, values: DetailsFormValue
       ),
       dependentChildren: answer(model.context.dependentChildren, Number(values.dependentChildren)),
     },
+  };
+}
+
+/**
+ * Fold the rental-property identity into `model.rental` (PRD FR-24 / T25).
+ *
+ * - "Yes" → `present: true` and the five `property.*` fields `answer`ed
+ *   (the user's own entry, so `confirmed`); `firstEarnedIncomeOn` stored ISO.
+ * - "No" → `present: false` with the five `property.*` fields and the three
+ *   scope-gate booleans reset to `unset`, so a no-rental return has nothing
+ *   the export gate (`collectInScopeFields`) or `requiredLabels` can trip on.
+ *   Returns the existing `rental` object untouched when there is nothing to
+ *   clear, so an unrelated save doesn't churn the reference.
+ *
+ * Toggling Yes → No → Yes is safe: No wipes the identity + scope booleans,
+ * Yes re-answers the identity, and the scope booleans are re-derived at the
+ * questions step. The rental *figures* are left as-is either way — they are
+ * ignored while `present` is false and re-surface (for re-confirmation on the
+ * review step) if the rental is re-declared.
+ */
+function applyRentalIdentity(model: ReturnModel, values: DetailsFormValues): ReturnModel["rental"] {
+  const rental = model.rental;
+  const property = rental.property;
+
+  if (values.hasRental) {
+    return {
+      ...rental,
+      present: true,
+      property: {
+        addressLine1: answer(property.addressLine1, values.rentalAddressLine1),
+        suburb: answer(property.suburb, values.rentalSuburb),
+        state: answer(property.state, values.rentalState),
+        postcode: answer(property.postcode, values.rentalPostcode),
+        firstEarnedIncomeOn: answer(
+          property.firstEarnedIncomeOn,
+          parseDdMmYyyyToIso(values.rentalFirstEarnedOn) ?? "",
+        ),
+      },
+    };
+  }
+
+  const alreadyClear =
+    !rental.present &&
+    property.addressLine1.status === "unset" &&
+    property.suburb.status === "unset" &&
+    property.state.status === "unset" &&
+    property.postcode.status === "unset" &&
+    property.firstEarnedIncomeOn.status === "unset" &&
+    rental.soleOwnership.status === "unset" &&
+    rental.rentedOrAvailableAllYear.status === "unset" &&
+    rental.noPrivateUse.status === "unset";
+  if (alreadyClear) return rental;
+
+  return {
+    ...rental,
+    present: false,
+    property: {
+      addressLine1: unsetField<string>(),
+      suburb: unsetField<string>(),
+      state: unsetField<string>(),
+      postcode: unsetField<string>(),
+      firstEarnedIncomeOn: unsetField<string>(),
+    },
+    soleOwnership: unsetField<boolean>(),
+    rentedOrAvailableAllYear: unsetField<boolean>(),
+    noPrivateUse: unsetField<boolean>(),
   };
 }

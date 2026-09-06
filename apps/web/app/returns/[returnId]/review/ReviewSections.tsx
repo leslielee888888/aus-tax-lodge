@@ -42,6 +42,8 @@ function rowKey(sectionId: string, row: ReviewRow): string {
       return `${sectionId}-phi-held`;
     case "computed":
       return `${sectionId}-computed-${row.label}`;
+    case "note":
+      return `${sectionId}-note-${row.label}`;
   }
 }
 
@@ -211,6 +213,27 @@ export function ReviewSections({
                       </div>
                       <div className="sm:w-64">
                         <Badge tone="muted">Computed</Badge>
+                      </div>
+                      <div className="sm:w-56" aria-hidden="true" />
+                    </div>
+                  );
+                case "note":
+                  return (
+                    <div
+                      key={key}
+                      className="flex flex-col gap-2 px-5 py-3.5 sm:flex-row sm:items-center sm:gap-4"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="font-medium">{row.label}</div>
+                        <div className="mt-0.5 text-[11px] text-muted">{row.sourceNote}</div>
+                      </div>
+                      <div className="text-left font-mono text-[13px] tabular-nums sm:w-28 sm:text-right">
+                        {row.displayValue}
+                      </div>
+                      <div className="sm:w-64">
+                        <Badge tone={row.settled ? "muted" : "warn"}>
+                          {row.settled ? "Confirmed" : "Later step"}
+                        </Badge>
                       </div>
                       <div className="sm:w-56" aria-hidden="true" />
                     </div>

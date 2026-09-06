@@ -5,11 +5,13 @@ import {
   normalizeBsb,
   parseDdMmYyyyToIso,
   validateAccountNumber,
+  validateAuState,
   validateBsb,
   validateDayCount,
   validateDob,
   validateNonNegativeAmount,
   validateNonNegativeInteger,
+  validatePastDate,
   validatePostcode,
   validateTfn,
 } from "../lib/details/validation";
@@ -101,6 +103,24 @@ describe("Postcode", () => {
     expect(validatePostcode("2000")).toBeNull();
     expect(validatePostcode("200")).toMatch(/4 digits/);
     expect(validatePostcode("")).toMatch(/required/i);
+  });
+});
+
+describe("Rental property identity (PRD FR-24)", () => {
+  it("accepts every Australian state / territory code and nothing else", () => {
+    for (const code of ["NSW", "VIC", "QLD", "SA", "WA", "TAS", "ACT", "NT"]) {
+      expect(validateAuState(code)).toBeNull();
+    }
+    expect(validateAuState("")).toMatch(/required/i);
+    expect(validateAuState("XYZ")).toMatch(/Australian state/i);
+    expect(validateAuState("nsw")).toMatch(/Australian state/i);
+  });
+
+  it("validatePastDate takes any real past DD/MM/YYYY date, however old", () => {
+    expect(validatePastDate("01/07/2005", "First earned")).toBeNull();
+    expect(validatePastDate("31/02/2020", "First earned")).toMatch(/real date/i);
+    expect(validatePastDate("01/01/2999", "First earned")).toMatch(/past/i);
+    expect(validatePastDate("", "First earned")).toMatch(/required/i);
   });
 });
 

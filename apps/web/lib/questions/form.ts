@@ -28,7 +28,8 @@
  *   jointAccounts[].sharePercent → income.interestAccounts[id].ownershipSharePercent
  *                               + questionnaire.jointAccountSharesProvided
  *   rentalSoleOwnershipAllYear/  → questionnaire.rentalScopeGate
- *     rentalBoughtOrSold           (only when `model.rental.present`)
+ *     rentalBoughtOrSold           + rental.{soleOwnership,rentedOrAvailableAllYear,
+ *                                   noPrivateUse} (only when `model.rental.present`)
  */
 import {
   answer,
@@ -117,7 +118,9 @@ export function unsettledJointAccounts(model: ReturnModel): readonly JointAccoun
 
 /** What T15's details step says about residency, reduced to the questionnaire's yes/no shape. */
 export function detailsResidentFullYear(model: ReturnModel): boolean {
-  return model.context.residency.value == null || model.context.residency.value === "resident-full-year";
+  return (
+    model.context.residency.value == null || model.context.residency.value === "resident-full-year"
+  );
 }
 
 /** What T15's details step says about holding a study/training loan. */
@@ -127,12 +130,17 @@ export function detailsHoldsStudyLoan(model: ReturnModel): boolean {
 
 /** `true` when the questionnaire's residency answer would disagree with the confirmed details-step value. */
 export function residencyDisagrees(model: ReturnModel, questionnaireAnswerYes: boolean): boolean {
-  return isSettled(model.context.residency) && detailsResidentFullYear(model) !== questionnaireAnswerYes;
+  return (
+    isSettled(model.context.residency) && detailsResidentFullYear(model) !== questionnaireAnswerYes
+  );
 }
 
 /** `true` when the questionnaire's study-loan answer would disagree with the confirmed details-step value. */
 export function studyLoanDisagrees(model: ReturnModel, questionnaireAnswerYes: boolean): boolean {
-  return isSettled(model.context.holdsStudyLoan) && detailsHoldsStudyLoan(model) !== questionnaireAnswerYes;
+  return (
+    isSettled(model.context.holdsStudyLoan) &&
+    detailsHoldsStudyLoan(model) !== questionnaireAnswerYes
+  );
 }
 
 /** A short label for the rental property, for the scope-gate questions' copy. */
@@ -144,10 +152,13 @@ export function rentalAddressLabel(model: ReturnModel): string {
 export function initialQuestionsFormValues(model: ReturnModel): QuestionsFormValues {
   const q = model.questionnaire;
   const days = model.context.privateHospitalCoverDays.value;
-  const privateCoverDates: PrivateCoverChoice = days == null || days >= 365 ? "full" : days <= 0 ? "none" : "part";
+  const privateCoverDates: PrivateCoverChoice =
+    days == null || days >= 365 ? "full" : days <= 0 ? "none" : "part";
 
   const gate = q.rentalScopeGate.value;
-  const rentalAllYear = gate ? gate.solelyOwned && gate.rentedOrAvailableAllYear && gate.noPrivateUse : true;
+  const rentalAllYear = gate
+    ? gate.solelyOwned && gate.rentedOrAvailableAllYear && gate.noPrivateUse
+    : true;
 
   return {
     residencyFullYear:
@@ -169,7 +180,10 @@ export function initialQuestionsFormValues(model: ReturnModel): QuestionsFormVal
     privateCoverDates,
     privateCoverDays: days != null ? String(days) : "",
     wfhDoubleClaimed: q.wfhHoursNotDoubleClaimed.value === false ? "yes" : "no",
-    jointAccounts: unsettledJointAccounts(model).map((row) => ({ accountId: row.accountId, sharePercent: "" })),
+    jointAccounts: unsettledJointAccounts(model).map((row) => ({
+      accountId: row.accountId,
+      sharePercent: "",
+    })),
     rentalSoleOwnershipAllYear: rentalAllYear ? "yes" : "no",
     rentalBoughtOrSold: gate ? (gate.notBoughtOrSoldThisYear ? "no" : "yes") : "no",
   };
@@ -201,7 +215,9 @@ export function parseQuestionsFormData(
     studyLoanHeld: yesNo(str("studyLoanHeld"), "no"),
     studyLoanDisagreement: disagreementChoice(str("studyLoanDisagreement")),
     privateCoverDates:
-      privateCoverDatesRaw === "part" || privateCoverDatesRaw === "none" ? privateCoverDatesRaw : "full",
+      privateCoverDatesRaw === "part" || privateCoverDatesRaw === "none"
+        ? privateCoverDatesRaw
+        : "full",
     privateCoverDays: str("privateCoverDays"),
     wfhDoubleClaimed: yesNo(str("wfhDoubleClaimed"), "no"),
     jointAccounts: jointAccountIds.map((accountId) => ({
@@ -271,7 +287,10 @@ export function validateQuestionsForm(
  * "use-answer" overwrites `context` to match what was just answered here.
  * With no disagreement, only the questionnaire field is touched.
  */
-export function applyQuestionsToModel(model: ReturnModel, values: QuestionsFormValues): ReturnModel {
+export function applyQuestionsToModel(
+  model: ReturnModel,
+  values: QuestionsFormValues,
+): ReturnModel {
   const residencyAnswerYes = values.residencyFullYear === "yes";
   let residencyFullYearField = answer(model.questionnaire.residencyFullYear, residencyAnswerYes);
   let residencyField = model.context.residency;
@@ -281,7 +300,10 @@ export function applyQuestionsToModel(model: ReturnModel, values: QuestionsFormV
       residencyAnswerYes ? "resident-full-year" : "non-resident",
     );
   } else if (values.residencyDisagreement === "keep-details") {
-    residencyFullYearField = answer(model.questionnaire.residencyFullYear, detailsResidentFullYear(model));
+    residencyFullYearField = answer(
+      model.questionnaire.residencyFullYear,
+      detailsResidentFullYear(model),
+    );
   }
 
   const studyLoanAnswerYes = values.studyLoanHeld === "yes";
@@ -293,16 +315,25 @@ export function applyQuestionsToModel(model: ReturnModel, values: QuestionsFormV
     studyLoanHeldField = answer(model.questionnaire.studyLoanHeld, detailsHoldsStudyLoan(model));
   }
 
-  const privateCoverDays = values.privateCoverDates === "full" ? 365 : Number(values.privateCoverDays);
-  const privateHospitalCoverDaysField = answer(model.context.privateHospitalCoverDays, privateCoverDays);
-  const privateCoverDatesConfirmedField = answer(model.questionnaire.privateCoverDatesConfirmed, true);
+  const privateCoverDays =
+    values.privateCoverDates === "full" ? 365 : Number(values.privateCoverDays);
+  const privateHospitalCoverDaysField = answer(
+    model.context.privateHospitalCoverDays,
+    privateCoverDays,
+  );
+  const privateCoverDatesConfirmedField = answer(
+    model.questionnaire.privateCoverDatesConfirmed,
+    true,
+  );
 
   const wfhHoursNotDoubleClaimedField = answer(
     model.questionnaire.wfhHoursNotDoubleClaimed,
     values.wfhDoubleClaimed === "no",
   );
 
-  const shareByAccountId = new Map(values.jointAccounts.map((row) => [row.accountId, row.sharePercent]));
+  const shareByAccountId = new Map(
+    values.jointAccounts.map((row) => [row.accountId, row.sharePercent]),
+  );
   const interestAccounts = model.income.interestAccounts.map((account) => {
     const sharePercent = shareByAccountId.get(account.id);
     if (sharePercent === undefined) return account;
@@ -311,9 +342,13 @@ export function applyQuestionsToModel(model: ReturnModel, values: QuestionsFormV
       ownershipSharePercent: answer(account.ownershipSharePercent, Number(sharePercent)),
     };
   });
-  const jointAccountSharesProvidedField = answer(model.questionnaire.jointAccountSharesProvided, true);
+  const jointAccountSharesProvidedField = answer(
+    model.questionnaire.jointAccountSharesProvided,
+    true,
+  );
 
   let rentalScopeGateField = model.questionnaire.rentalScopeGate;
+  let rental = model.rental;
   if (model.rental.present) {
     const allYear = values.rentalSoleOwnershipAllYear === "yes";
     const gate: RentalScopeGateAnswer = {
@@ -323,6 +358,18 @@ export function applyQuestionsToModel(model: ReturnModel, values: QuestionsFormV
       notBoughtOrSoldThisYear: values.rentalBoughtOrSold === "no",
     };
     rentalScopeGateField = answer(model.questionnaire.rentalScopeGate, gate);
+    // Keep the three `rental.*` scope booleans the FR-13 export gate
+    // (`collectInScopeFields`) checks in step with the answered gate — they
+    // are set here, and only here, from that same answer (PRD FR-24 / T25).
+    rental = {
+      ...rental,
+      soleOwnership: answer(rental.soleOwnership, gate.solelyOwned),
+      rentedOrAvailableAllYear: answer(
+        rental.rentedOrAvailableAllYear,
+        gate.rentedOrAvailableAllYear,
+      ),
+      noPrivateUse: answer(rental.noPrivateUse, gate.noPrivateUse),
+    };
   }
 
   return {
@@ -333,6 +380,7 @@ export function applyQuestionsToModel(model: ReturnModel, values: QuestionsFormV
       holdsStudyLoan: holdsStudyLoanField,
       privateHospitalCoverDays: privateHospitalCoverDaysField,
     },
+    rental,
     income: { ...model.income, interestAccounts },
     questionnaire: {
       residencyFullYear: residencyFullYearField,

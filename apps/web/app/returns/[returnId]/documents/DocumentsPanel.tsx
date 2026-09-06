@@ -20,6 +20,8 @@ import {
   FileIcon,
   UploadIcon,
 } from "../../../../components/icons";
+import { Field } from "../../../../components/Field";
+import { Input } from "../../../../components/Input";
 import { Select } from "../../../../components/Select";
 import {
   ACCEPTED_UPLOAD_LABEL,
@@ -36,6 +38,29 @@ export interface DocumentsPanelProps {
   /** `model.rental.present` — whether the return's rental scope is in progress (drives the checklist's rental row). */
   readonly rentalPresent: boolean;
   readonly initialExtracted: readonly ExtractedDocumentSummary[];
+  /**
+   * Any owner-paid rental expense / hand-entered depreciation figures already
+   * saved on the model (PRD FR-24), so a resumed return pre-fills the form.
+   */
+  readonly rentalInputs?: {
+    readonly insurance: number | null;
+    readonly landTax: number | null;
+    readonly bodyCorporate: number | null;
+    readonly capitalWorks: number | null;
+    readonly declineInValue: number | null;
+  };
+}
+
+const EMPTY_RENTAL_INPUTS = {
+  insurance: null,
+  landTax: null,
+  bodyCorporate: null,
+  capitalWorks: null,
+  declineInValue: null,
+} as const;
+
+function currencyDefault(value: number | null): string | undefined {
+  return value == null ? undefined : String(value);
 }
 
 interface UploadEntry {
@@ -76,6 +101,7 @@ export function DocumentsPanel({
   initialDocuments,
   rentalPresent,
   initialExtracted,
+  rentalInputs = EMPTY_RENTAL_INPUTS,
 }: DocumentsPanelProps) {
   const [documents, setDocuments] = useState<DocumentMetadata[]>([...initialDocuments]);
   const [uploads, setUploads] = useState<UploadEntry[]>([]);
@@ -194,6 +220,7 @@ export function DocumentsPanel({
 
   const presentTypes = new Set(documents.map((d) => d.detectedType));
   const hasPrefillReport = presentTypes.has("ato-prefill-report");
+  const hasQsSchedule = presentTypes.has("qs-depreciation-schedule");
   const checklistItems = rentalPresent ? [...CORE_CHECKLIST, ...RENTAL_CHECKLIST] : CORE_CHECKLIST;
 
   const failedByDocId = new Map((state.failed ?? []).map((f) => [f.docId, f.reason]));
@@ -447,16 +474,104 @@ export function DocumentsPanel({
         </Card>
       ) : null}
 
-      <form action={formAction} className="flex items-center justify-between gap-3">
-        <span className="text-xs text-muted">
-          {documents.length === 0
-            ? "Upload at least one document to continue."
-            : `${documents.length} document${documents.length === 1 ? "" : "s"} uploaded.`}
-        </span>
-        <Button type="submit" variant="primary" disabled={!canExtract} aria-busy={pending}>
-          {pending ? "Extracting…" : "Extract figures"}
-          <ArrowRightIcon className="size-3.5" />
-        </Button>
+      <form action={formAction} className="flex flex-col gap-5">
+        {rentalPresent ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>Rental — other figures</CardTitle>
+            </CardHeader>
+            <CardBody className="flex flex-col gap-4">
+              <fieldset className="m-0 flex flex-col gap-3 border-0 p-0">
+                <legend className="p-0 text-xs font-semibold">
+                  Owner-paid expenses not on the agent statement
+                </legend>
+                <p className="text-[11px] text-muted">
+                  Leave blank if not applicable, or if it&rsquo;s already on the managing
+                  agent&rsquo;s statement.
+                </p>
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <Field label="Landlord insurance" htmlFor="ownerPaidInsurance">
+                    <Input
+                      id="ownerPaidInsurance"
+                      name="ownerPaidInsurance"
+                      mono
+                      inputMode="decimal"
+                      placeholder="0.00"
+                      defaultValue={currencyDefault(rentalInputs.insurance)}
+                    />
+                  </Field>
+                  <Field label="Land tax" htmlFor="ownerPaidLandTax">
+                    <Input
+                      id="ownerPaidLandTax"
+                      name="ownerPaidLandTax"
+                      mono
+                      inputMode="decimal"
+                      placeholder="0.00"
+                      defaultValue={currencyDefault(rentalInputs.landTax)}
+                    />
+                  </Field>
+                  <Field label="Body corporate / strata" htmlFor="ownerPaidBodyCorporate">
+                    <Input
+                      id="ownerPaidBodyCorporate"
+                      name="ownerPaidBodyCorporate"
+                      mono
+                      inputMode="decimal"
+                      placeholder="0.00"
+                      defaultValue={currencyDefault(rentalInputs.bodyCorporate)}
+                    />
+                  </Field>
+                </div>
+              </fieldset>
+
+              {!hasQsSchedule ? (
+                <fieldset className="m-0 flex flex-col gap-3 border-0 p-0">
+                  <legend className="p-0 text-xs font-semibold">
+                    Depreciation — no quantity surveyor&rsquo;s schedule uploaded
+                  </legend>
+                  <p className="flex items-start gap-1.5 text-[11px] font-medium text-warn">
+                    <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
+                    Without a QS schedule you may be under-claiming. Enter this year&rsquo;s totals
+                    by hand if you have them, or leave blank to proceed without them.
+                  </p>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <Field label="Capital works (Division 43)" htmlFor="manualCapitalWorks">
+                      <Input
+                        id="manualCapitalWorks"
+                        name="manualCapitalWorks"
+                        mono
+                        inputMode="decimal"
+                        placeholder="0.00"
+                        defaultValue={currencyDefault(rentalInputs.capitalWorks)}
+                      />
+                    </Field>
+                    <Field label="Decline in value (Division 40)" htmlFor="manualDeclineInValue">
+                      <Input
+                        id="manualDeclineInValue"
+                        name="manualDeclineInValue"
+                        mono
+                        inputMode="decimal"
+                        placeholder="0.00"
+                        defaultValue={currencyDefault(rentalInputs.declineInValue)}
+                      />
+                    </Field>
+                  </div>
+                </fieldset>
+              ) : null}
+            </CardBody>
+          </Card>
+        ) : null}
+
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-xs text-muted">
+            {documents.length === 0
+              ? "Upload at least one document to continue."
+              : `${documents.length} document${documents.length === 1 ? "" : "s"} uploaded.`}
+          </span>
+          <Button type="submit" variant="primary" disabled={!canExtract} aria-busy={pending}>
+            {pending ? "Extracting…" : "Extract figures"}
+            <ArrowRightIcon className="size-3.5" />
+          </Button>
+        </div>
       </form>
     </div>
   );

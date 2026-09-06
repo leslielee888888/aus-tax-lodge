@@ -10,7 +10,9 @@ function Value({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex flex-col gap-1">
       <span className="text-xs font-semibold">{label}</span>
-      <span className="text-[13px] text-text">{children || <span className="text-muted">—</span>}</span>
+      <span className="text-[13px] text-text">
+        {children || <span className="text-muted">—</span>}
+      </span>
     </div>
   );
 }
@@ -33,6 +35,8 @@ export function DetailsReadOnly({ model, targetYear }: { model: ReturnModel; tar
   const address = t.postalAddress.value;
   const account = t.refundAccount.value;
   const hasSpouse = c.spouse.status.value === "had-spouse";
+  const rental = model.rental;
+  const rp = rental.property;
 
   return (
     <div className="flex flex-col gap-4">
@@ -68,7 +72,9 @@ export function DetailsReadOnly({ model, targetYear }: { model: ReturnModel; tar
             {c.holdsStudyLoan.value ? "Yes" : "No"}
           </Value>
           <Value label="Days held private hospital cover">
-            {c.privateHospitalCoverDays.value != null ? String(c.privateHospitalCoverDays.value) : ""}
+            {c.privateHospitalCoverDays.value != null
+              ? String(c.privateHospitalCoverDays.value)
+              : ""}
           </Value>
           <Value label="Dependent children">
             {c.dependentChildren.value != null ? String(c.dependentChildren.value) : ""}
@@ -98,6 +104,26 @@ export function DetailsReadOnly({ model, targetYear }: { model: ReturnModel; tar
             </>
           ) : (
             <p className="text-xs text-muted sm:col-span-2">No spouse for this return.</p>
+          )}
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Rental property</CardTitle>
+        </CardHeader>
+        <CardBody className="grid gap-4 sm:grid-cols-2">
+          {rental.present ? (
+            <>
+              <Value label="Property address">
+                {[rp.addressLine1.value, rp.suburb.value, rp.state.value, rp.postcode.value]
+                  .filter(Boolean)
+                  .join(", ")}
+              </Value>
+              <Value label="Rental income first earned">{rp.firstEarnedIncomeOn.value}</Value>
+            </>
+          ) : (
+            <p className="text-xs text-muted sm:col-span-2">No rental property for this return.</p>
           )}
         </CardBody>
       </Card>
