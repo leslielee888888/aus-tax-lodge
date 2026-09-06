@@ -1,0 +1,43 @@
+# Australian Individual Tax Return Assistant — NAS deployment (PRD FR-16).
+#
+#   Update:  docker compose pull && docker compose up -d
+#   Logs:    docker compose logs -f
+#   Rollback: set image: ...:<previous-sha> below, then `up -d`
+#
+# CI publishes the image to GHCR on every push to main (tags: `latest` and the
+# commit SHA). The NAS never builds — it pulls. In-progress returns live in the
+# `aus-tax-lodge-data` named volume and survive `pull` / `up -d` / a host reboot.
+
+services:
+  app:
+    image: ghcr.io/leslielee888888/aus-tax-lodge:latest
+    # Local build fallback (Synology classic builder is fine): `docker compose up -d --build`
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: aus-tax-lodge
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # The container's data dir is fixed; the volume below mounts here. A
+      # DATA_DIR in .env would be a host path and is ignored on purpose.
+      DATA_DIR: /data
+    ports:
+      - "3000:3000"
+    volumes:
+      - aus-tax-lodge-data:/data
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+volumes:
+  aus-tax-lodge-data:
+    name: aus-tax-lodge-data
