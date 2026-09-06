@@ -18,6 +18,7 @@ import { Field } from "../../../../components/Field";
 import { ArrowRightIcon } from "../../../../components/icons";
 import { Input } from "../../../../components/Input";
 import { Select } from "../../../../components/Select";
+import { AU_STATES } from "../../../../lib/au-states";
 import {
   parseDetailsFormData,
   validateDetailsForm,
@@ -53,6 +54,11 @@ const FIELD_ORDER: readonly (keyof DetailsFormValues)[] = [
   "spouseDob",
   "spouseIncome",
   "spouseCoverDays",
+  "rentalAddressLine1",
+  "rentalSuburb",
+  "rentalState",
+  "rentalPostcode",
+  "rentalFirstEarnedOn",
 ];
 
 function describedBy(id: string, hasHint: boolean, error?: string): string | undefined {
@@ -92,6 +98,7 @@ export function DetailsForm({
   const errors: DetailsFieldErrors = { ...state.errors, ...precheckErrors };
 
   const [hasSpouse, setHasSpouse] = useState(initialValues.hasSpouse);
+  const [hasRental, setHasRental] = useState(initialValues.hasRental);
   const [residency, setResidency] = useState(initialValues.residency);
   const [spouseName, setSpouseName] = useState(initialValues.spouseName);
 
@@ -574,6 +581,131 @@ export function DetailsForm({
                   ref={registerRef("spouseCoverDays")}
                   aria-invalid={Boolean(errors.spouseCoverDays)}
                   aria-describedby={describedBy("spouseCoverDays", true, errors.spouseCoverDays)}
+                />
+              </Field>
+            </div>
+          ) : null}
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Rental property</CardTitle>
+        </CardHeader>
+        <CardBody className="flex flex-col gap-4">
+          <label className="flex items-start gap-2.5 text-xs font-medium">
+            <input
+              type="checkbox"
+              name="hasRental"
+              checked={hasRental}
+              onChange={(e) => setHasRental(e.target.checked)}
+              className="mt-0.5 size-[18px] shrink-0 accent-accent"
+            />
+            <span>
+              <span className="font-medium">I had a rental property this year</span>
+              <span className="mt-0.5 block text-[11px] text-muted">
+                One solely-owned residential property, rented or genuinely available all year. A
+                co-owned, part-year, holiday or short-stay property is out of scope — that&rsquo;s
+                caught at the review step.
+              </span>
+            </span>
+          </label>
+
+          {hasRental ? (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field
+                label="Property address line 1"
+                htmlFor="rentalAddressLine1"
+                required
+                error={errors.rentalAddressLine1}
+              >
+                <Input
+                  id="rentalAddressLine1"
+                  name="rentalAddressLine1"
+                  required
+                  autoComplete="off"
+                  defaultValue={initialValues.rentalAddressLine1}
+                  ref={registerRef("rentalAddressLine1")}
+                  aria-invalid={Boolean(errors.rentalAddressLine1)}
+                  aria-describedby={
+                    errors.rentalAddressLine1 ? "rentalAddressLine1-error" : undefined
+                  }
+                />
+              </Field>
+
+              <Field label="Suburb" htmlFor="rentalSuburb" required error={errors.rentalSuburb}>
+                <Input
+                  id="rentalSuburb"
+                  name="rentalSuburb"
+                  required
+                  autoComplete="off"
+                  defaultValue={initialValues.rentalSuburb}
+                  ref={registerRef("rentalSuburb")}
+                  aria-invalid={Boolean(errors.rentalSuburb)}
+                  aria-describedby={errors.rentalSuburb ? "rentalSuburb-error" : undefined}
+                />
+              </Field>
+
+              <Field label="State" htmlFor="rentalState" required error={errors.rentalState}>
+                <Select
+                  id="rentalState"
+                  name="rentalState"
+                  required
+                  defaultValue={initialValues.rentalState}
+                  ref={registerRef("rentalState")}
+                  aria-invalid={Boolean(errors.rentalState)}
+                  aria-describedby={errors.rentalState ? "rentalState-error" : undefined}
+                >
+                  <option value="">Select…</option>
+                  {AU_STATES.map((code) => (
+                    <option key={code} value={code}>
+                      {code}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+
+              <Field
+                label="Postcode"
+                htmlFor="rentalPostcode"
+                required
+                error={errors.rentalPostcode}
+              >
+                <Input
+                  id="rentalPostcode"
+                  name="rentalPostcode"
+                  required
+                  mono
+                  inputMode="numeric"
+                  autoComplete="off"
+                  defaultValue={initialValues.rentalPostcode}
+                  ref={registerRef("rentalPostcode")}
+                  aria-invalid={Boolean(errors.rentalPostcode)}
+                  aria-describedby={errors.rentalPostcode ? "rentalPostcode-error" : undefined}
+                />
+              </Field>
+
+              <Field
+                label="Date rental income was first earned"
+                htmlFor="rentalFirstEarnedOn"
+                required
+                hint="DD/MM/YYYY — when the property first earned rent or was first genuinely available to rent."
+                error={errors.rentalFirstEarnedOn}
+              >
+                <Input
+                  id="rentalFirstEarnedOn"
+                  name="rentalFirstEarnedOn"
+                  required
+                  inputMode="numeric"
+                  placeholder="DD/MM/YYYY"
+                  defaultValue={initialValues.rentalFirstEarnedOn}
+                  ref={registerRef("rentalFirstEarnedOn")}
+                  aria-invalid={Boolean(errors.rentalFirstEarnedOn)}
+                  aria-describedby={describedBy(
+                    "rentalFirstEarnedOn",
+                    true,
+                    errors.rentalFirstEarnedOn,
+                  )}
                 />
               </Field>
             </div>

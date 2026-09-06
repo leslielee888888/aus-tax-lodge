@@ -38,6 +38,23 @@ export default async function DocumentsPage({ params }: { params: Promise<{ retu
   }
   const { envelope, readOnly, model } = loaded;
   const scratch = readExtractionScratch(model);
+
+  const ownerPaidValue = (key: "insurance" | "landTax" | "bodyCorporate"): number | null => {
+    const line = model.rental.expenses[key];
+    return line.source === "owner-paid" ? line.amount.value : null;
+  };
+  const handEnteredValue = (key: "capitalWorks" | "declineInValue"): number | null => {
+    const line = model.rental.expenses[key];
+    return line.amount.origin?.kind === "user-answer" ? line.amount.value : null;
+  };
+  const rentalInputs = {
+    insurance: ownerPaidValue("insurance"),
+    landTax: ownerPaidValue("landTax"),
+    bodyCorporate: ownerPaidValue("bodyCorporate"),
+    capitalWorks: handEnteredValue("capitalWorks"),
+    declineInValue: handEnteredValue("declineInValue"),
+  };
+
   const purgedAt = (await readExportManifest(returnId).catch(() => null))?.sourceDocumentsPurgedAt;
 
   return (
@@ -89,6 +106,7 @@ export default async function DocumentsPage({ params }: { params: Promise<{ retu
               initialDocuments={documents}
               rentalPresent={model.rental.present}
               initialExtracted={scratch.extracted}
+              rentalInputs={rentalInputs}
             />
           )}
         </div>

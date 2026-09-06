@@ -149,6 +149,102 @@ describe("applyDetailsToModel (PRD FR-1, FR-7)", () => {
     expect(model.context.spouse.privateHospitalCoverDays.value).toBe(365);
   });
 
+  it("Yes to a rental: sets present + every property field confirmed, ISO date", () => {
+    const model = applyDetailsToModel(
+      createEmptyReturnModel(),
+      validValues({
+        hasRental: true,
+        rentalAddressLine1: "10 Landlord Ln",
+        rentalSuburb: "Brunswick",
+        rentalState: "VIC",
+        rentalPostcode: "3056",
+        rentalFirstEarnedOn: "01/07/2019",
+      }),
+    );
+    expect(model.rental.present).toBe(true);
+    expect(model.rental.property.addressLine1).toMatchObject({
+      value: "10 Landlord Ln",
+      status: "confirmed",
+      origin: { kind: "user-answer" },
+    });
+    expect(model.rental.property.suburb.value).toBe("Brunswick");
+    expect(model.rental.property.state.value).toBe("VIC");
+    expect(model.rental.property.postcode.value).toBe("3056");
+    expect(model.rental.property.firstEarnedIncomeOn).toMatchObject({
+      value: "2019-07-01",
+      status: "confirmed",
+    });
+  });
+
+  it("No to a rental leaves the property fields and scope booleans unset, present false", () => {
+    const model = applyDetailsToModel(createEmptyReturnModel(), validValues({ hasRental: false }));
+    expect(model.rental.present).toBe(false);
+    expect(model.rental.property.addressLine1.status).toBe("unset");
+    expect(model.rental.soleOwnership.status).toBe("unset");
+  });
+
+  it("toggling Yes → No → Yes strands no stale confirmed identity data", () => {
+    const withRental = applyDetailsToModel(
+      createEmptyReturnModel(),
+      validValues({
+        hasRental: true,
+        rentalAddressLine1: "10 Landlord Ln",
+        rentalSuburb: "Brunswick",
+        rentalState: "VIC",
+        rentalPostcode: "3056",
+        rentalFirstEarnedOn: "01/07/2019",
+      }),
+    );
+    const backToNo = applyDetailsToModel(withRental, validValues({ hasRental: false }));
+    expect(backToNo.rental.present).toBe(false);
+    expect(backToNo.rental.property.addressLine1.status).toBe("unset");
+    expect(backToNo.rental.property.state.status).toBe("unset");
+
+    const yesAgain = applyDetailsToModel(
+      backToNo,
+      validValues({
+        hasRental: true,
+        rentalAddressLine1: "22 Other St",
+        rentalSuburb: "Coburg",
+        rentalState: "VIC",
+        rentalPostcode: "3058",
+        rentalFirstEarnedOn: "01/07/2020",
+      }),
+    );
+    expect(yesAgain.rental.present).toBe(true);
+    expect(yesAgain.rental.property.addressLine1.value).toBe("22 Other St");
+    expect(yesAgain.rental.property.firstEarnedIncomeOn.value).toBe("2020-07-01");
+  });
+
+  it("validates every rental field only when the toggle is on", () => {
+    expect(validateDetailsForm(validValues({ hasRental: false }))).toEqual({});
+    const errors = validateDetailsForm(validValues({ hasRental: true }));
+    expect(errors.rentalAddressLine1).toMatch(/required/i);
+    expect(errors.rentalSuburb).toMatch(/required/i);
+    expect(errors.rentalState).toMatch(/state/i);
+    expect(errors.rentalPostcode).toMatch(/postcode/i);
+    expect(errors.rentalFirstEarnedOn).toMatch(/required/i);
+  });
+
+  it("round-trips the rental identity back into form values (the resuming state)", () => {
+    const model = applyDetailsToModel(
+      createEmptyReturnModel(),
+      validValues({
+        hasRental: true,
+        rentalAddressLine1: "10 Landlord Ln",
+        rentalSuburb: "Brunswick",
+        rentalState: "VIC",
+        rentalPostcode: "3056",
+        rentalFirstEarnedOn: "01/07/2019",
+      }),
+    );
+    const values = detailsFormValuesFromModel(model);
+    expect(values.hasRental).toBe(true);
+    expect(values.rentalAddressLine1).toBe("10 Landlord Ln");
+    expect(values.rentalState).toBe("VIC");
+    expect(values.rentalFirstEarnedOn).toBe("01/07/2019");
+  });
+
   it("leaves every other section of the model untouched", () => {
     const base = createEmptyReturnModel();
     const seeded = {

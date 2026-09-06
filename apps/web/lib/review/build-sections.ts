@@ -65,9 +65,19 @@ export function describeOrigin(
     };
   }
   if (origin.kind === "user-answer") {
-    return { kind: "user-answer", label: "you entered it", confidenceTone: "muted", confidenceLabel: "Entered" };
+    return {
+      kind: "user-answer",
+      label: "you entered it",
+      confidenceTone: "muted",
+      confidenceLabel: "Entered",
+    };
   }
-  return { kind: "computed", label: "computed", confidenceTone: "muted", confidenceLabel: "Computed" };
+  return {
+    kind: "computed",
+    label: "computed",
+    confidenceTone: "muted",
+    confidenceLabel: "Computed",
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -118,6 +128,21 @@ export interface ComputedRowData {
   readonly displayValue: string;
 }
 
+/**
+ * A read-through row for a fact confirmed on an earlier step (PRD FR-24) — the
+ * rental property identity (from the details step) and the three scope-gate
+ * booleans (from the questionnaire). Never blocks "Continue": those steps own
+ * the gate. `settled` is `false` only for a scope boolean not yet answered.
+ */
+export interface NoteRowData {
+  readonly kind: "note";
+  readonly label: string;
+  readonly displayValue: string;
+  /** Calm provenance note, e.g. "From your details". */
+  readonly sourceNote: string;
+  readonly settled: boolean;
+}
+
 export interface PhiHeldRowData {
   readonly kind: "phi-held";
   readonly held: boolean | null;
@@ -145,6 +170,7 @@ export type ReviewRow =
   | InterestAccountRowData
   | RepairsGateRowData
   | ComputedRowData
+  | NoteRowData
   | PhiHeldRowData
   | MismatchRowData;
 
@@ -180,19 +206,22 @@ function rowIsSettled(row: ReviewRow): boolean {
       return false;
     case "computed":
       return true;
+    case "note":
+      return row.settled;
   }
 }
 
-/** Whether `row` counts toward the section's confirmable total (a computed row never needs confirming). */
+/** Whether `row` counts toward the section's confirmable total (computed + note rows never need confirming here). */
 function rowCounts(row: ReviewRow): boolean {
-  return row.kind !== "computed";
+  return row.kind !== "computed" && row.kind !== "note";
 }
 
 // ---------------------------------------------------------------------------
 // Mismatch translation (extraction's `modelPath` vocabulary → a review row)
 // ---------------------------------------------------------------------------
 
-const MISMATCH_ARRAY_RE = /^income\.(salaryWages|interestAccounts|dividends)\[(\d+)\]\.([a-zA-Z]+)$/;
+const MISMATCH_ARRAY_RE =
+  /^income\.(salaryWages|interestAccounts|dividends)\[(\d+)\]\.([a-zA-Z]+)$/;
 
 const DIVIDEND_FIELD_LABEL: Record<string, string> = {
   unfranked: "Dividends — unfranked amount",
@@ -201,10 +230,18 @@ const DIVIDEND_FIELD_LABEL: Record<string, string> = {
   tfnAmountsWithheld: "TFN amounts withheld — dividends",
 };
 
-function describeMismatchLabel(model: ReturnModel, modelPath: string): { label: string; sublabel?: string } {
+function describeMismatchLabel(
+  model: ReturnModel,
+  modelPath: string,
+): { label: string; sublabel?: string } {
   const arrayMatch = MISMATCH_ARRAY_RE.exec(modelPath);
   if (arrayMatch) {
-    const [, arrayName, indexText, field] = arrayMatch as unknown as [string, string, string, string];
+    const [, arrayName, indexText, field] = arrayMatch as unknown as [
+      string,
+      string,
+      string,
+      string,
+    ];
     const index = Number(indexText);
     if (arrayName === "salaryWages") {
       const employer = model.income.salaryWages[index];
@@ -290,7 +327,10 @@ function describeMismatch(
     suggestedIndex: suggestDefaultChoice(pending).chosenIndex,
     candidates: pending.candidates.map((candidate) => ({
       source: candidateSourceLabel(candidate, documentsByDocId),
-      displayValue: typeof candidate.value === "number" ? formatMoney(candidate.value) : String(candidate.value),
+      displayValue:
+        typeof candidate.value === "number"
+          ? formatMoney(candidate.value)
+          : String(candidate.value),
       confidenceTone: CONFIDENCE_BADGE[candidate.confidence].tone,
       confidenceLabel: CONFIDENCE_BADGE[candidate.confidence].label,
     })),
@@ -317,7 +357,11 @@ function fieldRow(
   const valueKind = opts.valueKind ?? "money";
   const rawValue = num(field);
   const displayValue =
-    valueKind === "money" ? formatMoney(rawValue) : valueKind === "percent" ? formatPercent(rawValue) : formatCount(rawValue);
+    valueKind === "money"
+      ? formatMoney(rawValue)
+      : valueKind === "percent"
+        ? formatPercent(rawValue)
+        : formatCount(rawValue);
   return {
     kind: "field",
     path,
@@ -328,7 +372,10 @@ function fieldRow(
     valueKind,
     status: field.status,
     source,
-    unverified: source.kind === "document" && field.origin?.kind === "document" && field.origin.confidence === "unverified",
+    unverified:
+      source.kind === "document" &&
+      field.origin?.kind === "document" &&
+      field.origin.confidence === "unverified",
     unsubstantiated: opts.unsubstantiated,
   };
 }
@@ -378,16 +425,22 @@ function buildIncomeSection(
   });
 
   model.income.interestAccounts.forEach((account, index) => {
-    const grossPending = pendingByPath.get(extractionArrayPath("interestAccounts", index, "grossInterest"));
+    const grossPending = pendingByPath.get(
+      extractionArrayPath("interestAccounts", index, "grossInterest"),
+    );
     if (grossPending) {
       rows.push(describeMismatch(model, grossPending, documentsByDocId));
     } else {
       const share = account.ownershipSharePercent.value;
-      const apportioned = share != null && account.grossInterest.value != null ? apportionedInterest(account) : null;
+      const apportioned =
+        share != null && account.grossInterest.value != null ? apportionedInterest(account) : null;
       const grossSource = describeOrigin(account.grossInterest.origin, documentsByDocId);
       const shareSource = describeOrigin(account.ownershipSharePercent.origin, documentsByDocId);
-      const bothSettled = isSettled(account.grossInterest) && isSettled(account.ownershipSharePercent);
-      const eitherProposed = account.grossInterest.status !== "unset" || account.ownershipSharePercent.status !== "unset";
+      const bothSettled =
+        isSettled(account.grossInterest) && isSettled(account.ownershipSharePercent);
+      const eitherProposed =
+        account.grossInterest.status !== "unset" ||
+        account.ownershipSharePercent.status !== "unset";
       rows.push({
         kind: "interest-account",
         accountId: account.id,
@@ -405,7 +458,10 @@ function buildIncomeSection(
         status: bothSettled ? "confirmed" : eitherProposed ? "proposed" : "unset",
         source: grossSource,
         shareSource,
-        unverified: grossSource.kind === "document" && account.grossInterest.origin?.kind === "document" && account.grossInterest.origin.confidence === "unverified",
+        unverified:
+          grossSource.kind === "document" &&
+          account.grossInterest.origin?.kind === "document" &&
+          account.grossInterest.origin.confidence === "unverified",
       });
     }
     pushOrMismatch(extractionArrayPath("interestAccounts", index, "tfnAmountsWithheld"), () =>
@@ -421,33 +477,50 @@ function buildIncomeSection(
 
   model.income.dividends.forEach((holding, index) => {
     const sublabel = holding.company.value ?? undefined;
-    (["unfranked", "franked", "frankingCredits", "tfnAmountsWithheld"] as const).forEach((field) => {
-      pushOrMismatch(extractionArrayPath("dividends", index, field), () =>
-        fieldRow(
-          `income.dividends.${holding.id}.${field}`,
-          field === "unfranked"
-            ? name("11S")
-            : field === "franked"
-              ? name("11T")
-              : field === "frankingCredits"
-                ? name("11U")
-                : name("11V"),
-          holding[field],
-          documentsByDocId,
-          { sublabel },
-        ),
-      );
-    });
+    (["unfranked", "franked", "frankingCredits", "tfnAmountsWithheld"] as const).forEach(
+      (field) => {
+        pushOrMismatch(extractionArrayPath("dividends", index, field), () =>
+          fieldRow(
+            `income.dividends.${holding.id}.${field}`,
+            field === "unfranked"
+              ? name("11S")
+              : field === "franked"
+                ? name("11T")
+                : field === "frankingCredits"
+                  ? name("11U")
+                  : name("11V"),
+            holding[field],
+            documentsByDocId,
+            { sublabel },
+          ),
+        );
+      },
+    );
   });
 
   pushOrMismatch("income.governmentAllowances", () =>
-    fieldRow("income.governmentAllowances", name("5"), model.income.governmentAllowances, documentsByDocId),
+    fieldRow(
+      "income.governmentAllowances",
+      name("5"),
+      model.income.governmentAllowances,
+      documentsByDocId,
+    ),
   );
   pushOrMismatch("income.reportableFringeBenefits", () =>
-    fieldRow("income.reportableFringeBenefits", name("IT1"), model.income.reportableFringeBenefits, documentsByDocId),
+    fieldRow(
+      "income.reportableFringeBenefits",
+      name("IT1"),
+      model.income.reportableFringeBenefits,
+      documentsByDocId,
+    ),
   );
   pushOrMismatch("income.reportableEmployerSuper", () =>
-    fieldRow("income.reportableEmployerSuper", name("IT2"), model.income.reportableEmployerSuper, documentsByDocId),
+    fieldRow(
+      "income.reportableEmployerSuper",
+      name("IT2"),
+      model.income.reportableEmployerSuper,
+      documentsByDocId,
+    ),
   );
 
   const confirmable = rows.filter(rowCounts);
@@ -485,13 +558,20 @@ function buildDeductionsSection(
     }
   };
 
-  pushDeduction("deductions.workRelatedCar.amount", "deductions.workRelatedCar.amount", name("D1"), d.workRelatedCar.amount, {
-    sublabel:
-      d.workRelatedCar.businessKilometres.value != null && d.workRelatedCar.ratePerKm.value != null
-        ? `${d.workRelatedCar.businessKilometres.value} km × $${d.workRelatedCar.ratePerKm.value}/km`
-        : undefined,
-    unsubstantiated: d.workRelatedCar.unsubstantiated,
-  });
+  pushDeduction(
+    "deductions.workRelatedCar.amount",
+    "deductions.workRelatedCar.amount",
+    name("D1"),
+    d.workRelatedCar.amount,
+    {
+      sublabel:
+        d.workRelatedCar.businessKilometres.value != null &&
+        d.workRelatedCar.ratePerKm.value != null
+          ? `${d.workRelatedCar.businessKilometres.value} km × $${d.workRelatedCar.ratePerKm.value}/km`
+          : undefined,
+      unsubstantiated: d.workRelatedCar.unsubstantiated,
+    },
+  );
   pushDeduction(
     "deductions.workRelatedTravel.amount",
     "deductions.workRelatedTravel.amount",
@@ -506,9 +586,15 @@ function buildDeductionsSection(
     d.workRelatedClothing.amount,
     { unsubstantiated: d.workRelatedClothing.unsubstantiated },
   );
-  pushDeduction("deductions.selfEducation.amount", "deductions.selfEducation.amount", name("D4"), d.selfEducation.amount, {
-    unsubstantiated: d.selfEducation.unsubstantiated,
-  });
+  pushDeduction(
+    "deductions.selfEducation.amount",
+    "deductions.selfEducation.amount",
+    name("D4"),
+    d.selfEducation.amount,
+    {
+      unsubstantiated: d.selfEducation.unsubstantiated,
+    },
+  );
   pushDeduction(
     "deductions.otherWorkRelated.amount",
     "deductions.otherWorkRelated.amount",
@@ -522,7 +608,10 @@ function buildDeductionsSection(
     "Working from home — fixed rate",
     d.workFromHome.amount,
     {
-      sublabel: d.workFromHome.hours.value != null ? `${d.workFromHome.hours.value} hours worked from home` : undefined,
+      sublabel:
+        d.workFromHome.hours.value != null
+          ? `${d.workFromHome.hours.value} hours worked from home`
+          : undefined,
       unsubstantiated: d.workFromHome.unsubstantiated,
     },
   );
@@ -563,12 +652,63 @@ function buildRentalSection(
   if (!model.rental.present) return null;
   const rental = model.rental;
   const taxonomy = getTaxonomy(model.targetYear);
-  const scheduleName = (key: string) => taxonomy.rentalSchedule.find((l) => l.key === key)?.name ?? key;
+  const scheduleName = (key: string) =>
+    taxonomy.rentalSchedule.find((l) => l.key === key)?.name ?? key;
   const rows: ReviewRow[] = [];
 
-  rows.push(fieldRow("rental.grossRent", scheduleName("grossRent"), rental.grossRent, documentsByDocId));
+  // Property identity — confirmed on the details step; shown read-through.
+  const property = rental.property;
+  const address = [
+    property.addressLine1.value,
+    property.suburb.value,
+    property.state.value,
+    property.postcode.value,
+  ]
+    .filter(Boolean)
+    .join(", ");
+  rows.push({
+    kind: "note",
+    label: "Property address",
+    displayValue: address || "—",
+    sourceNote: "From your details",
+    settled: isSettled(property.addressLine1),
+  });
+  rows.push({
+    kind: "note",
+    label: "Rental income first earned",
+    displayValue: property.firstEarnedIncomeOn.value ?? "—",
+    sourceNote: "From your details",
+    settled: isSettled(property.firstEarnedIncomeOn),
+  });
+
+  // Scope-gate booleans — set from the questionnaire answer (a later step).
+  // Shown as a calm note, never a row that blocks "Continue".
+  const scopeNote = (label: string, field: Provenanced<boolean>) => {
+    const settled = isSettled(field);
+    rows.push({
+      kind: "note",
+      label,
+      displayValue: field.value == null ? "—" : field.value ? "Yes" : "No",
+      sourceNote: settled
+        ? "Confirmed from your questionnaire answer"
+        : "You’ll confirm this in the questionnaire",
+      settled,
+    });
+  };
+  scopeNote("Solely owned", rental.soleOwnership);
+  scopeNote("Rented or available all year", rental.rentedOrAvailableAllYear);
+  scopeNote("No private use", rental.noPrivateUse);
+
   rows.push(
-    fieldRow("rental.otherRentalIncome", scheduleName("otherRentalIncome"), rental.otherRentalIncome, documentsByDocId),
+    fieldRow("rental.grossRent", scheduleName("grossRent"), rental.grossRent, documentsByDocId),
+  );
+  rows.push(
+    fieldRow(
+      "rental.otherRentalIncome",
+      scheduleName("otherRentalIncome"),
+      rental.otherRentalIncome,
+      documentsByDocId,
+    ),
   );
 
   const otherKeys = RENTAL_EXPENSE_KEYS.filter((k) => k !== "repairsAndMaintenance");
@@ -602,7 +742,10 @@ function buildRentalSection(
     );
   }
 
-  const totalDeductions = RENTAL_EXPENSE_KEYS.reduce((sum, key) => sum + (rental.expenses[key].amount.value ?? 0), 0);
+  const totalDeductions = RENTAL_EXPENSE_KEYS.reduce(
+    (sum, key) => sum + (rental.expenses[key].amount.value ?? 0),
+    0,
+  );
   const grossIncome = (rental.grossRent.value ?? 0) + (rental.otherRentalIncome.value ?? 0);
   const net = rental.netRentalResult.value;
   rows.push({
@@ -632,18 +775,29 @@ function buildOffsetsSection(
 
   rows.push({ kind: "phi-held", held: p.held.value, status: p.held.status });
 
-  const anyPhiTouched = [p.premiumsEligibleForRebate, p.rebateReceived, p.oldestCoveredPersonAge, p.coverDays].some(
-    (f) => f.status !== "unset",
-  );
+  const anyPhiTouched = [
+    p.premiumsEligibleForRebate,
+    p.rebateReceived,
+    p.oldestCoveredPersonAge,
+    p.coverDays,
+  ].some((f) => f.status !== "unset");
   if (p.held.value === true || anyPhiTouched) {
     const pushPhi = (path: string, label: string, field: Provenanced<number>) => {
       const pending = pendingByPath.get(path);
       if (pending) rows.push(describeMismatch(model, pending, documentsByDocId));
       else rows.push(fieldRow(path, label, field, documentsByDocId));
     };
-    pushPhi("privateHealth.premiumsEligibleForRebate", "Private health — premiums eligible for rebate", p.premiumsEligibleForRebate);
+    pushPhi(
+      "privateHealth.premiumsEligibleForRebate",
+      "Private health — premiums eligible for rebate",
+      p.premiumsEligibleForRebate,
+    );
     pushPhi("privateHealth.rebateReceived", "Private health — rebate received", p.rebateReceived);
-    pushPhi("privateHealth.oldestCoveredPersonAge", "Age of oldest person covered (at 30 June)", p.oldestCoveredPersonAge);
+    pushPhi(
+      "privateHealth.oldestCoveredPersonAge",
+      "Age of oldest person covered (at 30 June)",
+      p.oldestCoveredPersonAge,
+    );
     pushPhi("privateHealth.coverDays", "Days of private hospital cover", p.coverDays);
   }
 
@@ -695,11 +849,15 @@ export function buildReviewData(
       `${pendingReconciliation.length} mismatch${pendingReconciliation.length === 1 ? "" : "es"}`,
     );
   }
-  if (confirmed < total) blockingReasons.push(`${total - confirmed} unconfirmed figure${total - confirmed === 1 ? "" : "s"}`);
+  if (confirmed < total)
+    blockingReasons.push(
+      `${total - confirmed} unconfirmed figure${total - confirmed === 1 ? "" : "s"}`,
+    );
   if (repairsOutstanding) blockingReasons.push("the flagged rental repairs line");
   if (phiHeldOutstanding) blockingReasons.push("whether you held private health cover");
 
-  const canContinue = confirmed === total && !unresolvedMismatches && !repairsOutstanding && !phiHeldOutstanding;
+  const canContinue =
+    confirmed === total && !unresolvedMismatches && !repairsOutstanding && !phiHeldOutstanding;
 
   return {
     sections,

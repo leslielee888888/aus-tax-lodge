@@ -7,7 +7,20 @@ import {
   extractDocument,
   type DocumentExtractionResult,
 } from "@aus-tax-lodge/extraction";
-import { createEmptyReturnModel, RETURN_MODEL_VERSION, type ReturnModel } from "@aus-tax-lodge/model";
+import {
+  answer,
+  assembleRentalSchedule,
+  createEmptyReturnModel,
+  recomputeNetRentalResult,
+  RENTAL_EXPENSE_KEYS,
+  RETURN_MODEL_VERSION,
+  type OwnerPaidRentalExpenses,
+  type RentalExpenseSource,
+  type RentalSchedule,
+  type RentalSourceDocument,
+  type RentalSourceDocuments,
+  type ReturnModel,
+} from "@aus-tax-lodge/model";
 
 import { getClaudeClient } from "../../../../lib/ai/client";
 import {
@@ -44,27 +57,102 @@ function isReturnModel(data: unknown): data is ReturnModel {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Rental documents (PRD FR-24) — these do not go through the generic
+// `extractDocument` prompt table; they are folded in via `assembleRentalSchedule`.
+// ---------------------------------------------------------------------------
+
+const RENTAL_DOC_SLOT = {
+  "rental-agent-statement": "agentStatement",
+  "loan-interest-summary": "loanSummary",
+  "qs-depreciation-schedule": "qsSchedule",
+} as const;
+
+type RentalDocType = keyof typeof RENTAL_DOC_SLOT;
+type RentalDocSlot = (typeof RENTAL_DOC_SLOT)[RentalDocType];
+
+function isRentalDocType(type: string): type is RentalDocType {
+  return type in RENTAL_DOC_SLOT;
+}
+
+/** A blank / invalid entry → `undefined`, so `assembleRentalSchedule` leaves that line alone. */
+function parseCurrency(raw: FormDataEntryValue | null): number | undefined {
+  if (raw == null) return undefined;
+  const trimmed = raw
+    .toString()
+    .trim()
+    .replace(/[$,\s]/g, "");
+  if (!trimmed) return undefined;
+  const value = Number(trimmed);
+  return Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+/** Hand-entered Div 43 / Div 40 totals (PRD FR-24 / Q23) — recorded as the user's own answer. */
+function applyManualDepreciation(
+  schedule: RentalSchedule,
+  capitalWorks: number | undefined,
+  declineInValue: number | undefined,
+): RentalSchedule {
+  if (capitalWorks === undefined && declineInValue === undefined) return schedule;
+  const expenses = { ...schedule.expenses };
+  if (capitalWorks !== undefined) {
+    expenses.capitalWorks = {
+      amount: answer(expenses.capitalWorks.amount, capitalWorks),
+      source: "owner-paid",
+    };
+  }
+  if (declineInValue !== undefined) {
+    expenses.declineInValue = {
+      amount: answer(expenses.declineInValue.amount, declineInValue),
+      source: "owner-paid",
+    };
+  }
+  return recomputeNetRentalResult({ ...schedule, expenses });
+}
+
+function slotSourceType(slot: RentalDocSlot): RentalExpenseSource {
+  return slot === "agentStatement"
+    ? "agent-statement"
+    : slot === "loanSummary"
+      ? "loan-summary"
+      : "qs-schedule";
+}
+
+/** A rough count of figures the given document contributed to the assembled schedule, for the panel badge. */
+function countFiguresForSlot(schedule: RentalSchedule, slot: RentalDocSlot): number {
+  const sourceType = slotSourceType(slot);
+  let count = RENTAL_EXPENSE_KEYS.filter(
+    (key) =>
+      schedule.expenses[key].source === sourceType &&
+      schedule.expenses[key].amount.status !== "unset",
+  ).length;
+  if (slot === "agentStatement") {
+    if (schedule.grossRent.origin?.kind === "document") count += 1;
+    if (schedule.otherRentalIncome.origin?.kind === "document") count += 1;
+  }
+  return count;
+}
+
 /**
  * Runs figure extraction (PRD FR-3) over every extractable document the
  * return hasn't already had extracted, folds the results into the model with
  * `applyExtractions` (PRD FR-2, FR-7, FR-21), and saves.
  *
- * A single document's extraction failure is caught and skipped — the rest of
- * the batch, and the save of whatever succeeded, still go ahead (PRD §7 step
- * 4, "extraction failed for a file"). Only once every currently-outstanding
- * extractable document has succeeded does this advance `currentStep` to
- * `"review"` and redirect there; otherwise it returns the failures for the
- * documents screen to show. From there the user can either re-click "Extract
- * figures" (retries every still-outstanding document, failed ones included —
- * `extracted` in the scratch bucket only ever grows on success) or correct a
- * failed file's type to "Unrecognised", which flips it `extractable: false`
- * and drops it out of every future run.
+ * The three rental document types (agent statement, loan-interest summary, QS
+ * depreciation schedule) have no generic prompt — they are folded in through
+ * `assembleRentalSchedule` (PRD FR-24), together with any owner-paid expenses
+ * and hand-entered Div 43 / Div 40 totals posted from the documents form.
+ *
+ * A single document's failure is caught and skipped — the rest of the batch,
+ * and the save of whatever succeeded, still go ahead (PRD §7 step 4). Only
+ * once every currently-outstanding document (rental included) has been
+ * processed does this advance `currentStep` to `"review"` and redirect there.
  */
 export async function extractFigures(
   returnId: string,
   expectedRevision: number,
   _previous: ExtractFiguresState,
-  _formData: FormData,
+  formData: FormData,
 ): Promise<ExtractFiguresState> {
   const repository = getReturnRepository();
   const { envelope, readOnly } = await repository.loadReturn(returnId);
@@ -87,11 +175,14 @@ export async function extractFigures(
   const alreadyExtracted = new Set(scratch.extracted.map((entry) => entry.docId));
 
   const pending = documents.filter((doc) => doc.extractable && !alreadyExtracted.has(doc.docId));
+  const rentalPending = pending.filter((doc) => isRentalDocType(doc.detectedType));
+  const genericPending = pending.filter((doc) => !isRentalDocType(doc.detectedType));
 
   const extractions: DocumentExtractionResult[] = [];
   const failed: FailedExtraction[] = [];
   const succeeded: { docId: string; figuresCount: number }[] = [];
-  for (const doc of pending) {
+
+  for (const doc of genericPending) {
     try {
       const result = await extractDocument(returnId, doc.docId, { store: documentStore, client });
       extractions.push(result);
@@ -109,7 +200,62 @@ export async function extractFigures(
     currentModel,
     extractions,
   );
-  const nextModel = withExtractionScratch(modelWithFigures, {
+
+  const ownerPaid: OwnerPaidRentalExpenses = {
+    insurance: parseCurrency(formData.get("ownerPaidInsurance")),
+    landTax: parseCurrency(formData.get("ownerPaidLandTax")),
+    bodyCorporate: parseCurrency(formData.get("ownerPaidBodyCorporate")),
+  };
+  const manualCapitalWorks = parseCurrency(formData.get("manualCapitalWorks"));
+  const manualDeclineInValue = parseCurrency(formData.get("manualDeclineInValue"));
+
+  let nextModelBase = modelWithFigures;
+
+  if (currentModel.rental.present) {
+    const sourceDocuments: {
+      -readonly [K in keyof RentalSourceDocuments]: RentalSourceDocument;
+    } = {};
+    const included: { docId: string; slot: RentalDocSlot }[] = [];
+
+    for (const doc of rentalPending) {
+      const slot = RENTAL_DOC_SLOT[doc.detectedType as RentalDocType];
+      try {
+        const stored = await documentStore.getDocument(returnId, doc.docId);
+        sourceDocuments[slot] = {
+          docId: doc.docId,
+          bytes: stored.bytes,
+          mimeType: stored.metadata.mimeType,
+        };
+        included.push({ docId: doc.docId, slot });
+      } catch (err) {
+        failed.push({
+          docId: doc.docId,
+          filename: doc.filename,
+          reason: err instanceof Error ? err.message : "couldn't read this file",
+        });
+      }
+    }
+
+    const hasOwnerPaid = Object.values(ownerPaid).some((v) => v !== undefined);
+    const hasManualDepreciation =
+      manualCapitalWorks !== undefined || manualDeclineInValue !== undefined;
+    const qsDocPresent = documents.some((d) => d.detectedType === "qs-depreciation-schedule");
+
+    if (included.length > 0 || hasOwnerPaid || hasManualDepreciation) {
+      let schedule = await assembleRentalSchedule(currentModel, sourceDocuments, client, ownerPaid);
+      // Only accept hand-entered Div 43 / Div 40 when there is no QS schedule
+      // to read them from (PRD FR-24 / Q23).
+      if (!qsDocPresent) {
+        schedule = applyManualDepreciation(schedule, manualCapitalWorks, manualDeclineInValue);
+      }
+      nextModelBase = { ...modelWithFigures, rental: schedule };
+      for (const { docId, slot } of included) {
+        succeeded.push({ docId, figuresCount: countFiguresForSlot(schedule, slot) });
+      }
+    }
+  }
+
+  const nextModel = withExtractionScratch(nextModelBase, {
     extracted: [...scratch.extracted, ...succeeded],
     pendingReconciliation: mergePendingReconciliation(
       scratch.pendingReconciliation,
@@ -128,8 +274,7 @@ export async function extractFigures(
     return {
       status: "error",
       conflict: true,
-      formError:
-        "This return changed in another tab. Reload the page to see the latest version.",
+      formError: "This return changed in another tab. Reload the page to see the latest version.",
     };
   }
 

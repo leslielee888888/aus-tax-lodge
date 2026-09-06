@@ -12,6 +12,8 @@
 
 import { isValidBsb, isValidTfn } from "@aus-tax-lodge/validation";
 
+import { isAuState } from "../au-states";
+
 // ---------------------------------------------------------------------------
 // Small parsing helpers
 // ---------------------------------------------------------------------------
@@ -82,6 +84,24 @@ export function validateDob(raw: string, label = "Date of birth"): string | null
 export function validatePostcode(raw: string): string | null {
   if (!raw.trim()) return "Postcode is required";
   return /^\d{4}$/.test(raw.trim()) ? null : "Postcode must be 4 digits";
+}
+
+/** One of the Australian state / territory codes (rental property address, FR-24). */
+export function validateAuState(raw: string, label = "State"): string | null {
+  if (!raw.trim()) return `${label} is required`;
+  return isAuState(raw.trim()) ? null : `${label} must be an Australian state or territory`;
+}
+
+/**
+ * A real, past `DD/MM/YYYY` date that need not be recent — used for the date a
+ * rental property first earned income / was first available to rent (FR-24).
+ */
+export function validatePastDate(raw: string, label: string): string | null {
+  if (!raw.trim()) return `${label} is required`;
+  const iso = parseDdMmYyyyToIso(raw);
+  if (!iso) return `${label} must be a real date, as DD/MM/YYYY`;
+  if (iso >= new Date().toISOString().slice(0, 10)) return `${label} must be in the past`;
+  return null;
 }
 
 export function validateTfn(raw: string): string | null {
