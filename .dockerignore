@@ -1,0 +1,34 @@
+# Build context hygiene — keep the image small and the cache stable.
+node_modules
+**/node_modules
+.next
+**/.next
+out
+**/out
+dist
+**/dist
+build
+**/build
+coverage
+**/coverage
+*.tsbuildinfo
+
+# Never ship secrets or local runtime data into the image.
+.env
+.env.local
+.env.*.local
+data
+**/data
+*.return.json
+
+# VCS / editor / CI noise
+.git
+.github
+.gitignore
+.gitattributes
+*.log
+npm-debug.log*
+.DS_Store
+
+# Docs and design assets aren't needed at runtime.
+docs

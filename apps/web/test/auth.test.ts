@@ -41,10 +41,12 @@ describe("session cookie value", () => {
 });
 
 describe("isPublicPath", () => {
-  it("only /unlock is public", () => {
+  it("only /unlock and the health check are public", () => {
     expect(isPublicPath("/unlock")).toBe(true);
+    expect(isPublicPath("/api/health")).toBe(true);
     expect(isPublicPath("/")).toBe(false);
     expect(isPublicPath("/returns/new")).toBe(false);
+    expect(isPublicPath("/api/returns/abc/documents")).toBe(false);
   });
 });
 

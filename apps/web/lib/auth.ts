@@ -14,9 +14,10 @@ const SESSION_MESSAGE = "atl-session-v1";
 /** Name of the signed, httpOnly session cookie set on a successful unlock. */
 export const SESSION_COOKIE = "atl_session";
 
-/** Routes reachable without a valid session — the unlock screen and its POST. */
+/** Routes reachable without a valid session — the unlock screen and its POST,
+ * and the container health check (liveness only, exposes no data). */
 export function isPublicPath(pathname: string): boolean {
-  return pathname === "/unlock";
+  return pathname === "/unlock" || pathname === "/api/health";
 }
 
 /** The configured passphrase, trimmed, or `undefined` if unset/blank. */
