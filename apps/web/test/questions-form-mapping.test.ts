@@ -339,6 +339,42 @@ describe("applyQuestionsToModel", () => {
       notBoughtOrSoldThisYear: true,
     });
   });
+
+  it("also derives the three rental.* scope booleans from the same answer (PRD FR-24 / T25)", () => {
+    const model = { ...readyModel(), rental: { ...readyModel().rental, present: true } };
+
+    const inScope = applyQuestionsToModel(model, {
+      ...BASE_VALUES,
+      rentalSoleOwnershipAllYear: "yes",
+      rentalBoughtOrSold: "no",
+    });
+    for (const field of [
+      inScope.rental.soleOwnership,
+      inScope.rental.rentedOrAvailableAllYear,
+      inScope.rental.noPrivateUse,
+    ]) {
+      expect(field).toMatchObject({
+        value: true,
+        status: "confirmed",
+        origin: { kind: "user-answer" },
+      });
+    }
+
+    const outOfScope = applyQuestionsToModel(model, {
+      ...BASE_VALUES,
+      rentalSoleOwnershipAllYear: "no",
+      rentalBoughtOrSold: "no",
+    });
+    expect(outOfScope.rental.soleOwnership.value).toBe(false);
+    expect(outOfScope.rental.rentedOrAvailableAllYear.value).toBe(false);
+    expect(outOfScope.rental.noPrivateUse.value).toBe(false);
+  });
+
+  it("leaves rental.* untouched when the return has no rental", () => {
+    const model = readyModel();
+    const next = applyQuestionsToModel(model, { ...BASE_VALUES });
+    expect(next.rental).toBe(model.rental);
+  });
 });
 
 // Sanity check the fixtures helper re-exported by review-fixtures is usable here too.

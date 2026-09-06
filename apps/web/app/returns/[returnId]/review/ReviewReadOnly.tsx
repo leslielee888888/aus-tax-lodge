@@ -13,10 +13,15 @@ function readOnlyRow(row: ReviewRow, key: string) {
   switch (row.kind) {
     case "field":
       return (
-        <div key={key} className="flex flex-col gap-2 px-5 py-3.5 sm:flex-row sm:items-center sm:gap-4">
+        <div
+          key={key}
+          className="flex flex-col gap-2 px-5 py-3.5 sm:flex-row sm:items-center sm:gap-4"
+        >
           <div className="min-w-0 flex-1">
             <div className="truncate font-medium">{row.label}</div>
-            {row.sublabel ? <div className="mt-0.5 text-[11px] text-muted">{row.sublabel}</div> : null}
+            {row.sublabel ? (
+              <div className="mt-0.5 text-[11px] text-muted">{row.sublabel}</div>
+            ) : null}
           </div>
           <div className="text-left font-mono text-[13px] font-semibold tabular-nums sm:w-28 sm:text-right">
             {row.displayValue}
@@ -26,7 +31,10 @@ function readOnlyRow(row: ReviewRow, key: string) {
       );
     case "interest-account":
       return (
-        <div key={key} className="flex flex-col gap-2 px-5 py-3.5 sm:flex-row sm:items-center sm:gap-4">
+        <div
+          key={key}
+          className="flex flex-col gap-2 px-5 py-3.5 sm:flex-row sm:items-center sm:gap-4"
+        >
           <div className="min-w-0 flex-1">
             <div className="truncate font-medium">{row.label}</div>
             <div className="mt-0.5 text-[11px] text-muted">{row.sublabel}</div>
@@ -46,9 +54,14 @@ function readOnlyRow(row: ReviewRow, key: string) {
       );
     case "repairs-gate":
       return (
-        <div key={key} className="flex flex-col gap-2 bg-warn-soft px-5 py-3.5 sm:flex-row sm:items-center sm:gap-4">
+        <div
+          key={key}
+          className="flex flex-col gap-2 bg-warn-soft px-5 py-3.5 sm:flex-row sm:items-center sm:gap-4"
+        >
           <div className="min-w-0 flex-1 font-medium">Repairs and maintenance</div>
-          <div className="font-mono text-[13px] font-semibold sm:w-28 sm:text-right">{row.displayValue}</div>
+          <div className="font-mono text-[13px] font-semibold sm:w-28 sm:text-right">
+            {row.displayValue}
+          </div>
           <Badge tone="warn">Unresolved</Badge>
         </div>
       );
@@ -63,7 +76,29 @@ function readOnlyRow(row: ReviewRow, key: string) {
       return (
         <div key={key} className="flex items-center gap-4 border-t-2 border-border px-5 py-3.5">
           <div className="min-w-0 flex-1 font-bold">{row.label}</div>
-          <div className="font-mono text-[14px] font-bold tabular-nums text-accent">{row.displayValue}</div>
+          <div className="font-mono text-[14px] font-bold tabular-nums text-accent">
+            {row.displayValue}
+          </div>
+        </div>
+      );
+    case "note":
+      return (
+        <div
+          key={key}
+          className="flex flex-col gap-2 px-5 py-3.5 sm:flex-row sm:items-center sm:gap-4"
+        >
+          <div className="min-w-0 flex-1">
+            <div className="truncate font-medium">{row.label}</div>
+            <div className="mt-0.5 text-[11px] text-muted">{row.sourceNote}</div>
+          </div>
+          <div className="text-left font-mono text-[13px] font-semibold tabular-nums sm:w-28 sm:text-right">
+            {row.displayValue}
+          </div>
+          <div className="sm:w-40">
+            <Badge tone={row.settled ? "ok" : "muted"}>
+              {row.settled ? "Confirmed" : "Later step"}
+            </Badge>
+          </div>
         </div>
       );
   }
