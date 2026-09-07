@@ -18,6 +18,7 @@ import {
   confirm,
   createEmptyReturnModel,
   markNotApplicable,
+  RENTAL_EXPENSE_KEYS,
   unsetField,
   type Provenanced,
   type ReturnModel,
@@ -239,11 +240,6 @@ export function detailsModel(opts: { holdsStudyLoan: boolean; targetYear?: strin
  * deduction rows nil.
  */
 export function settleRentalScheduleGaps(model: ReturnModel): ReturnModel {
-  // Local import to avoid a cycle at module top.
-
-  const RENTAL_EXPENSE_KEYS = (
-    require("@aus-tax-lodge/model") as typeof import("@aus-tax-lodge/model")
-  ).RENTAL_EXPENSE_KEYS;
   const expenses = { ...model.rental.expenses };
   for (const key of RENTAL_EXPENSE_KEYS) {
     const line = expenses[key];
@@ -258,34 +254,12 @@ export function settleRentalScheduleGaps(model: ReturnModel): ReturnModel {
   return { ...model, rental: { ...model.rental, expenses, otherRentalIncome } };
 }
 
-/**
- * ⚠️ COMPENSATES FOR A REAL WIRING GAP (see the T23 report). No production code
- * in `apps/web` ever sets `rental.property.*` or the `rental.soleOwnership` /
- * `rentedOrAvailableAllYear` / `noPrivateUse` scope-gate booleans, yet
- * `@aus-tax-lodge/validation` `collectInScopeFields` requires them confirmed
- * before export. This helper does what the missing web glue should do: derive
- * the three booleans from the answered `questionnaire.rentalScopeGate` and
- * record a property identity.
- */
-export function settleRentalWiringGap(model: ReturnModel): ReturnModel {
-  const gate = model.questionnaire.rentalScopeGate.value;
-  return {
-    ...model,
-    rental: {
-      ...model.rental,
-      property: {
-        addressLine1: ans("2 Rental Rd"),
-        suburb: ans("Sydney"),
-        state: ans("NSW"),
-        postcode: ans("2000"),
-        firstEarnedIncomeOn: ans("2020-06-01"),
-      },
-      soleOwnership: ans(gate?.solelyOwned ?? true),
-      rentedOrAvailableAllYear: ans(gate?.rentedOrAvailableAllYear ?? true),
-      noPrivateUse: ans(gate?.noPrivateUse ?? true),
-    },
-  };
-}
+// `settleRentalWiringGap` was removed in T23 AC2: T25 (PR #49) wired the real
+// web glue — `lib/details/form.ts` `applyRentalIdentity` records `rental.property.*`
+// and `lib/questions/form.ts` `applyQuestionsToModel` derives the three
+// `rental.{soleOwnership,rentedOrAvailableAllYear,noPrivateUse}` booleans from
+// the answered scope gate — so the shim no longer compensates for anything.
+// `rental-flow.test.ts` drives that real wiring end to end.
 
 // ---------------------------------------------------------------------------
 // WinZip-AES (AES-256, method 99) zip reader — proves the archive decrypts
