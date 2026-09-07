@@ -134,8 +134,10 @@ describe("extractDocument", () => {
     const frankingFigure = disagreeing.figures.find((f) => f.modelPath.endsWith("frankingCredits"));
     expect(frankingFigure?.confidence).toBe("medium");
 
+    // A fully-franked $1,000 dividend carries $428.57 of franking credits
+    // ($1,000 × 30/70), not $300.
     const agreeingText: TextLayer = {
-      pages: ["ASX Co Unfranked 0.00 Franked 1,000.00 Franking credit 300.00"],
+      pages: ["ASX Co Unfranked 0.00 Franked 1,000.00 Franking credit 428.57"],
     };
     const agreeingReply = jsonReply([
       {
@@ -146,9 +148,9 @@ describe("extractDocument", () => {
       },
       {
         modelPath: "income.dividends[0].frankingCredits",
-        value: 300,
+        value: 428.57,
         page: 1,
-        snippet: "Franking credit 300.00",
+        snippet: "Franking credit 428.57",
       },
     ]);
     const agreeing = await extractDocument("return-1", "doc-2", {

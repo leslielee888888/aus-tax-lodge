@@ -7,7 +7,7 @@ import {
   computeCarKmDeduction,
   computeWfhFixedRateDeduction,
 } from "../src/model";
-import { documentOrigin, propose } from "../src/provenance";
+import { confirm, documentOrigin, propose } from "../src/provenance";
 import { MissingFiguresError, toEngineInput } from "../src/to-engine-input";
 import { conf, FIXTURE_NET_RENTAL_RESULT, fullyPopulatedReturn } from "./fixtures";
 
@@ -60,6 +60,24 @@ describe("toEngineInput — mapping confirmed figures (PRD FR-4, FR-8)", () => {
     };
     // 400 @ 50% + 1000 @ 100%
     expect(toEngineInput(withTwo).income.grossInterest).toBe(1_200);
+  });
+
+  it("treats a settled-but-null ownership share as sole ownership (100%), not 0%", () => {
+    const model = fullyPopulatedReturn();
+    const empty = createEmptyInterestAccount("a-sole");
+    const sole = {
+      ...empty,
+      grossInterest: conf(4_000),
+      // confirmed with no value — the review "Confirm" button on an account
+      // whose joint-share question was never asked.
+      ownershipSharePercent: confirm(empty.ownershipSharePercent),
+    };
+    const withSole = {
+      ...model,
+      income: { ...model.income, interestAccounts: [sole] },
+    };
+    // Must be the full $4,000 — not $0.
+    expect(toEngineInput(withSole).income.grossInterest).toBe(4_000);
   });
 
   it("passes spouse taxable income only when the taxpayer had a spouse", () => {

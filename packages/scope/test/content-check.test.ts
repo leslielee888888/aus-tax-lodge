@@ -48,6 +48,21 @@ describe("parseScopeContentReply", () => {
   it("de-duplicates", () => {
     expect(parseScopeContentReply('["capital-gains","capital-gains"]')).toEqual(["capital-gains"]);
   });
+
+  it("does not flag a category named in negating prose with no array", () => {
+    // A false hard-stop has no override — a reply like this must resolve to
+    // "nothing flagged", not "flag everything mentioned".
+    expect(
+      parseScopeContentReply("None apply. This is not business-income or capital-gains."),
+    ).toEqual([]);
+  });
+
+  it("still salvages categories from a malformed (unparseable) array", () => {
+    expect(parseScopeContentReply("['capital-gains', 'foreign-income',]")).toEqual([
+      "capital-gains",
+      "foreign-income",
+    ]);
+  });
 });
 
 describe("checkDocumentForOutOfScopeContent", () => {

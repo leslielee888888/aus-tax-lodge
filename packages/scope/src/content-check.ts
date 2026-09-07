@@ -68,26 +68,32 @@ export function parseScopeContentReply(reply: string): ScopeContentCategory[] {
   const found = new Set<ScopeContentCategory>();
   const arrayText = reply.match(/\[[\s\S]*?\]/)?.[0];
 
-  if (arrayText !== undefined) {
-    try {
-      const parsed: unknown = JSON.parse(arrayText);
-      if (Array.isArray(parsed)) {
-        for (const entry of parsed) {
-          if (typeof entry === "string") {
-            const id = entry
-              .trim()
-              .toLowerCase()
-              .replace(/[_\s]+/g, "-");
-            if (isScopeContentCategory(id)) found.add(id);
-          }
+  // No JSON array at all — the model didn't follow the format. Treat as "no
+  // finding" rather than scanning the prose: a phrase like "this is NOT
+  // business-income" would otherwise match and hard-stop an in-scope return
+  // with no override.
+  if (arrayText === undefined) return [];
+
+  try {
+    const parsed: unknown = JSON.parse(arrayText);
+    if (Array.isArray(parsed)) {
+      for (const entry of parsed) {
+        if (typeof entry === "string") {
+          const id = entry
+            .trim()
+            .toLowerCase()
+            .replace(/[_\s]+/g, "-");
+          if (isScopeContentCategory(id)) found.add(id);
         }
       }
-    } catch {
-      // Fall through to the token scan below.
+      return [...found];
     }
+  } catch {
+    // A malformed array (trailing comma, single quotes) — fall through to a
+    // token scan bounded to the bracketed slice only.
   }
 
-  const haystack = (arrayText ?? reply).toLowerCase();
+  const haystack = arrayText.toLowerCase();
   for (const category of SCOPE_CONTENT_CATEGORIES) {
     const pattern = new RegExp(`\\b${category.replace(/-/g, "[-_ ]?")}\\b`, "i");
     if (pattern.test(haystack)) found.add(category);

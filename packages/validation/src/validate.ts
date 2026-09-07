@@ -183,8 +183,28 @@ export function validateReturn(
       `Franking credits (holding ${i + 1})`,
     );
   });
+  rejectNegative(
+    "income.governmentAllowances",
+    model.income.governmentAllowances.value,
+    "Taxable government allowances",
+  );
+  rejectNegative(
+    "income.reportableFringeBenefits",
+    model.income.reportableFringeBenefits.value,
+    "Reportable fringe benefits",
+  );
+  rejectNegative(
+    "income.reportableEmployerSuper",
+    model.income.reportableEmployerSuper.value,
+    "Reportable employer super contributions",
+  );
   if (model.rental.present) {
     rejectNegative("rental.grossRent", model.rental.grossRent.value, "Gross rent");
+    rejectNegative(
+      "rental.otherRentalIncome",
+      model.rental.otherRentalIncome.value,
+      "Other rental income",
+    );
     for (const key of RENTAL_EXPENSE_KEYS) {
       rejectNegative(
         `rental.expenses.${key}.amount`,
