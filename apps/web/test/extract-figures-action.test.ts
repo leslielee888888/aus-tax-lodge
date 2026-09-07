@@ -1,28 +1,36 @@
 import { createEmptyReturnModel } from "@aus-tax-lodge/model";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { loadReturn, saveReturn, listDocuments, extractDocument } = vi.hoisted(() => ({
-  loadReturn: vi.fn(),
-  saveReturn: vi.fn(),
-  listDocuments: vi.fn(),
-  extractDocument: vi.fn(),
-}));
+const { loadReturn, saveReturn, listDocuments, getDocument, extractDocument, checkContent } =
+  vi.hoisted(() => ({
+    loadReturn: vi.fn(),
+    saveReturn: vi.fn(),
+    listDocuments: vi.fn(),
+    getDocument: vi.fn(),
+    extractDocument: vi.fn(),
+    checkContent: vi.fn(),
+  }));
 
 vi.mock("../lib/returns", () => ({
   getReturnRepository: () => ({ loadReturn, saveReturn }),
 }));
 
 vi.mock("../lib/store", () => ({
-  getDocumentStore: () => ({ listDocuments }),
+  getDocumentStore: () => ({ listDocuments, getDocument }),
 }));
 
 vi.mock("../lib/ai/client", () => ({
-  getClaudeClient: () => ({}),
+  getClaudeClient: () => ({ askVision: vi.fn() }),
 }));
 
 vi.mock("@aus-tax-lodge/extraction", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@aus-tax-lodge/extraction")>();
   return { ...actual, extractDocument };
+});
+
+vi.mock("@aus-tax-lodge/scope", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@aus-tax-lodge/scope")>();
+  return { ...actual, checkDocumentForOutOfScopeContent: checkContent };
 });
 
 vi.mock("next/navigation", () => ({
@@ -31,10 +39,13 @@ vi.mock("next/navigation", () => ({
   },
 }));
 
+import { detectOutOfScope, isBlocked } from "@aus-tax-lodge/scope";
+
 import {
   extractFigures,
   INITIAL_EXTRACT_FIGURES_STATE,
 } from "../app/returns/[returnId]/documents/actions";
+import { scopeContentFindings } from "../lib/scope-content-scratch";
 
 function fakeDoc(overrides: Partial<Record<string, unknown>> = {}) {
   return {
@@ -56,7 +67,21 @@ describe("extractFigures server action (PRD FR-2, FR-3, FR-7, FR-21)", () => {
     loadReturn.mockReset();
     saveReturn.mockReset();
     listDocuments.mockReset();
+    getDocument.mockReset();
     extractDocument.mockReset();
+    checkContent.mockReset();
+    getDocument.mockResolvedValue({
+      metadata: { mimeType: "application/pdf" },
+      bytes: Buffer.from("doc-bytes"),
+    });
+    // Default: the content check comes back clean (no out-of-scope categories).
+    checkContent.mockImplementation(
+      async ({ docId, filename }: { docId: string; filename: string }) => ({
+        docId,
+        filename,
+        categories: [],
+      }),
+    );
   });
 
   it("extracts every extractable document not yet extracted, applies the figures, saves, and redirects to review", async () => {
@@ -207,5 +232,243 @@ describe("extractFigures server action (PRD FR-2, FR-3, FR-7, FR-21)", () => {
 
     expect(result.status).toBe("error");
     expect(result.conflict).toBe(true);
+  });
+});
+
+describe("extractFigures — document-content out-of-scope check (PRD FR-20)", () => {
+  beforeEach(() => {
+    loadReturn.mockReset();
+    saveReturn.mockReset();
+    listDocuments.mockReset();
+    getDocument.mockReset();
+    extractDocument.mockReset();
+    checkContent.mockReset();
+    loadReturn.mockResolvedValue({
+      envelope: { targetYear: "2025-26", data: null, revision: 1, currentStep: "documents" },
+      readOnly: false,
+    });
+    getDocument.mockResolvedValue({
+      metadata: { mimeType: "application/pdf" },
+      bytes: Buffer.from("doc-bytes"),
+    });
+    extractDocument.mockImplementation(async (_returnId: string, docId: string) => ({
+      docId,
+      documentType: "dividend-statement",
+      figures: [],
+    }));
+    checkContent.mockImplementation(
+      async ({ docId, filename }: { docId: string; filename: string }) => ({
+        docId,
+        filename,
+        categories: [],
+      }),
+    );
+    saveReturn.mockResolvedValue({
+      conflict: false,
+      envelope: { targetYear: "2025-26", data: null, revision: 2 },
+    });
+  });
+
+  it("checks a dividend-statement, persists an out-of-scope classification, and the review detector is then blocked", async () => {
+    listDocuments.mockResolvedValue([
+      fakeDoc({
+        docId: "div1",
+        filename: "acme-fund-statement.pdf",
+        detectedType: "dividend-statement",
+      }),
+    ]);
+    checkContent.mockResolvedValue({
+      docId: "div1",
+      filename: "acme-fund-statement.pdf",
+      categories: ["trust-partnership-managed-fund-distribution"],
+    });
+
+    await expect(
+      extractFigures("ret1", 1, INITIAL_EXTRACT_FIGURES_STATE, new FormData()),
+    ).rejects.toThrow("REDIRECT:/returns/ret1/review");
+
+    expect(checkContent).toHaveBeenCalledTimes(1);
+    expect(checkContent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        docId: "div1",
+        filename: "acme-fund-statement.pdf",
+        parts: [{ kind: "pdf", mimeType: "application/pdf", bytes: expect.any(Buffer) }],
+      }),
+      expect.anything(),
+    );
+
+    const savedModel = saveReturn.mock.calls[0]![1].data;
+    expect(savedModel.__t26ScopeContent.classifications).toEqual([
+      {
+        docId: "div1",
+        filename: "acme-fund-statement.pdf",
+        detectedType: "dividend-statement",
+        categories: ["trust-partnership-managed-fund-distribution"],
+      },
+    ]);
+
+    // The review page's data path: feed the cached findings back to the detector.
+    const findings = detectOutOfScope({
+      model: savedModel,
+      contentFindings: scopeContentFindings(savedModel),
+    });
+    expect(isBlocked(findings)).toBe(true);
+    const trust = findings.find((f) => f.code === "trust-partnership-managed-fund-distribution");
+    expect(trust?.source).toBe("document");
+    expect(trust?.detail).toContain("acme-fund-statement.pdf");
+  });
+
+  it("checks an unrecognised document even though it is not extractable", async () => {
+    listDocuments.mockResolvedValue([
+      fakeDoc({
+        docId: "unk1",
+        filename: "mystery.pdf",
+        detectedType: "unrecognised",
+        extractable: false,
+      }),
+    ]);
+
+    await expect(
+      extractFigures("ret1", 1, INITIAL_EXTRACT_FIGURES_STATE, new FormData()),
+    ).rejects.toThrow("REDIRECT:");
+
+    expect(extractDocument).not.toHaveBeenCalled();
+    expect(checkContent).toHaveBeenCalledTimes(1);
+    expect(checkContent).toHaveBeenCalledWith(
+      expect.objectContaining({ docId: "unk1" }),
+      expect.anything(),
+    );
+    const savedModel = saveReturn.mock.calls[0]![1].data;
+    expect(savedModel.__t26ScopeContent.classifications).toEqual([
+      { docId: "unk1", filename: "mystery.pdf", detectedType: "unrecognised", categories: [] },
+    ]);
+  });
+
+  it("does not re-check a document whose classification is already cached", async () => {
+    loadReturn.mockResolvedValue({
+      envelope: {
+        targetYear: "2025-26",
+        revision: 3,
+        currentStep: "documents",
+        data: {
+          ...createEmptyReturnModel("2025-26"),
+          __t26ScopeContent: {
+            classifications: [
+              {
+                docId: "div1",
+                filename: "divs.pdf",
+                detectedType: "dividend-statement",
+                categories: [],
+              },
+            ],
+          },
+        },
+      },
+      readOnly: false,
+    });
+    listDocuments.mockResolvedValue([
+      fakeDoc({ docId: "div1", filename: "divs.pdf", detectedType: "dividend-statement" }),
+    ]);
+
+    await expect(
+      extractFigures("ret1", 3, INITIAL_EXTRACT_FIGURES_STATE, new FormData()),
+    ).rejects.toThrow("REDIRECT:");
+
+    expect(checkContent).not.toHaveBeenCalled();
+    const savedModel = saveReturn.mock.calls[0]![1].data;
+    expect(savedModel.__t26ScopeContent.classifications).toHaveLength(1);
+  });
+
+  it("re-checks a document whose detectedType changed since it was cached", async () => {
+    loadReturn.mockResolvedValue({
+      envelope: {
+        targetYear: "2025-26",
+        revision: 3,
+        currentStep: "documents",
+        data: {
+          ...createEmptyReturnModel("2025-26"),
+          __t26ScopeContent: {
+            classifications: [
+              {
+                docId: "doc1",
+                filename: "f.pdf",
+                detectedType: "unrecognised",
+                categories: [],
+              },
+            ],
+          },
+        },
+      },
+      readOnly: false,
+    });
+    listDocuments.mockResolvedValue([
+      fakeDoc({ docId: "doc1", filename: "f.pdf", detectedType: "dividend-statement" }),
+    ]);
+
+    await expect(
+      extractFigures("ret1", 3, INITIAL_EXTRACT_FIGURES_STATE, new FormData()),
+    ).rejects.toThrow("REDIRECT:");
+
+    expect(checkContent).toHaveBeenCalledTimes(1);
+    const savedModel = saveReturn.mock.calls[0]![1].data;
+    expect(savedModel.__t26ScopeContent.classifications[0].detectedType).toBe("dividend-statement");
+  });
+
+  it("reports a content-check failure as a failed entry and does not advance to review", async () => {
+    listDocuments.mockResolvedValue([
+      fakeDoc({ docId: "div1", filename: "divs.pdf", detectedType: "dividend-statement" }),
+    ]);
+    checkContent.mockRejectedValue(new Error("Claude API 503"));
+
+    const result = await extractFigures("ret1", 1, INITIAL_EXTRACT_FIGURES_STATE, new FormData());
+
+    expect(result.status).toBe("partial");
+    expect(result.failed).toEqual([
+      { docId: "div1", filename: "divs.pdf", reason: "Claude API 503" },
+    ]);
+    expect(saveReturn).toHaveBeenCalledExactlyOnceWith(
+      "ret1",
+      expect.objectContaining({ currentStep: "documents", expectedRevision: 1 }),
+    );
+  });
+
+  it("prunes a cached classification for a document that no longer needs a content check", async () => {
+    loadReturn.mockResolvedValue({
+      envelope: {
+        targetYear: "2025-26",
+        revision: 3,
+        currentStep: "documents",
+        data: {
+          ...createEmptyReturnModel("2025-26"),
+          __t16Extraction: {
+            extracted: [{ docId: "doc1", figuresCount: 0 }],
+            pendingReconciliation: [],
+          },
+          __t26ScopeContent: {
+            classifications: [
+              {
+                docId: "doc1",
+                filename: "f.pdf",
+                detectedType: "dividend-statement",
+                categories: [],
+              },
+            ],
+          },
+        },
+      },
+      readOnly: false,
+    });
+    // Re-typed to a recognised, trusted type — no longer in the content-check set.
+    listDocuments.mockResolvedValue([
+      fakeDoc({ docId: "doc1", filename: "f.pdf", detectedType: "bank-interest-notice" }),
+    ]);
+
+    await expect(
+      extractFigures("ret1", 3, INITIAL_EXTRACT_FIGURES_STATE, new FormData()),
+    ).rejects.toThrow("REDIRECT:");
+
+    expect(checkContent).not.toHaveBeenCalled();
+    const savedModel = saveReturn.mock.calls[0]![1].data;
+    expect(savedModel.__t26ScopeContent.classifications).toEqual([]);
   });
 });

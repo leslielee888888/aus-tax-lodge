@@ -3,6 +3,8 @@ import { issueId } from "@aus-tax-lodge/export";
 import type { ReturnModel } from "@aus-tax-lodge/model";
 import { isExportBlocked, validateReturn } from "@aus-tax-lodge/validation";
 
+import { scopeContentFindings } from "../scope-content-scratch";
+
 /**
  * The FR-13/FR-14 export gate, shared by the export screen (to enable/disable
  * the download controls) and the route handlers (to refuse a bypassed
@@ -35,7 +37,13 @@ export function computeExportGate(
   assessment: FullAssessment | null,
   acknowledgedWarningIds: readonly string[],
 ): ExportGate {
-  const issues = assessment ? validateReturn(model, assessment) : validateReturn(model);
+  // FR-20 defense in depth: a document whose content is out of scope (cached on
+  // the model by `extractFigures`) also blocks export here, not only at the
+  // review hard stop.
+  const contentFindings = scopeContentFindings(model);
+  const issues = assessment
+    ? validateReturn(model, assessment, contentFindings)
+    : validateReturn(model, undefined, contentFindings);
   const acknowledged = new Set(acknowledgedWarningIds);
 
   const errors = issues

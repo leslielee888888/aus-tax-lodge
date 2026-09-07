@@ -10,6 +10,7 @@ import { TopBar } from "../../../../components/TopBar";
 import { WizardSteps } from "../../../../components/WizardSteps";
 import { readExportManifest } from "../../../../lib/export/persist";
 import { readExtractionScratch } from "../../../../lib/extraction-scratch";
+import { scopeContentFindings } from "../../../../lib/scope-content-scratch";
 import { formatIncomeYear } from "../../../../lib/format";
 import { buildReviewData } from "../../../../lib/review/build-sections";
 import { loadReturnModel } from "../../../../lib/returns";
@@ -29,13 +30,13 @@ export const dynamic = "force-dynamic";
  * proceed. Runs `detectOutOfScope` first; a blocked return gets the hard-stop
  * screen instead of the review UI, with no way to continue (FR-20).
  *
- * `documents` (filename + detected type) are trivially at hand here and are
- * passed to the detector, but T11's Claude content-classification pass
- * (`checkDocumentForOutOfScopeContent` in `@aus-tax-lodge/scope`) is not yet
- * wired into the extraction pipeline, so `contentFindings` is not available —
- * a document whose *content* implies an out-of-scope item (e.g. a "dividend
- * statement" that's actually a trust distribution) is not yet caught here.
- * Follow-up for whichever task wires T11's extraction run to that check.
+ * `documents` (filename + detected type) are passed to the detector, along
+ * with `contentFindings` — T11's Claude content-classification results, which
+ * the `extractFigures` action (`documents/actions.ts`) runs over every
+ * `dividend-statement` / `unrecognised` document and caches on the model
+ * (`lib/scope-content-scratch.ts`). So a document whose *content* implies an
+ * out-of-scope item (e.g. a "dividend statement" that's actually a trust
+ * distribution) hard-stops the return here (PRD FR-20, Q12).
  */
 export default async function ReviewPage({ params }: { params: Promise<{ returnId: string }> }) {
   const { returnId } = await params;
@@ -57,6 +58,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ returnI
       detectedType: d.detectedType,
       filename: d.filename,
     })),
+    contentFindings: scopeContentFindings(model),
   });
 
   const context = `${model.taxpayer.fullName.value ?? "New return"} · ${formatIncomeYear(envelope.targetYear)}`;
