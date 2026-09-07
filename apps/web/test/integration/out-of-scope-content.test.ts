@@ -62,8 +62,9 @@ describe("T26 — document-content out-of-scope hard stop (FR-20)", () => {
     const { loadReturnModel } = await import("../../lib/returns");
     const { scopeContentFindings } = await import("../../lib/scope-content-scratch");
     const { computeExportGate } = await import("../../lib/export/gate");
-    const { extractFigures, INITIAL_EXTRACT_FIGURES_STATE } =
-      await import("../../app/returns/[returnId]/documents/actions");
+    const { extractFigures } = await import("../../app/returns/[returnId]/documents/actions");
+    const { INITIAL_EXTRACT_FIGURES_STATE } =
+      await import("../../app/returns/[returnId]/documents/state");
     const { createEmptyReturnModel } = await import("@aus-tax-lodge/model");
 
     const repo = getReturnRepository();

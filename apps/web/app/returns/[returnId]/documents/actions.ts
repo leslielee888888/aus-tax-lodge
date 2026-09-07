@@ -40,24 +40,12 @@ import {
   type ScopeContentClassificationEntry,
 } from "../../../../lib/scope-content-scratch";
 import { getDocumentStore } from "../../../../lib/store";
+// `ExtractFiguresState` / `FailedExtraction` / the initial value live in
+// `./state` — a "use server" module may only export async functions, so the
+// `INITIAL_EXTRACT_FIGURES_STATE` object cannot be exported from here.
+import type { ExtractFiguresState, FailedExtraction } from "./state";
 
-export interface FailedExtraction {
-  readonly docId: string;
-  readonly filename: string;
-  readonly reason: string;
-}
-
-export interface ExtractFiguresState {
-  readonly status: "idle" | "partial" | "error";
-  /** Every document `extractFigures` could not read this run (PRD §7 step 4). */
-  readonly failed?: readonly FailedExtraction[];
-  /** `docId`s this run successfully extracted and applied — lets the client update optimistically without a reload. */
-  readonly succeeded?: readonly { readonly docId: string; readonly figuresCount: number }[];
-  readonly formError?: string;
-  readonly conflict?: boolean;
-}
-
-export const INITIAL_EXTRACT_FIGURES_STATE: ExtractFiguresState = { status: "idle" };
+export type { ExtractFiguresState, FailedExtraction } from "./state";
 
 function isReturnModel(data: unknown): data is ReturnModel {
   return (
