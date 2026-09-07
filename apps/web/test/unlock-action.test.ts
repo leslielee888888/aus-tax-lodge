@@ -50,4 +50,22 @@ describe("unlock action", () => {
     expect(value).toBe(await sessionTokenFor(PASSPHRASE));
     expect(options).toMatchObject({ httpOnly: true, sameSite: "lax", path: "/" });
   });
+
+  it("leaves the cookie non-Secure by default so it survives LAN plain-HTTP", async () => {
+    cookieSet.mockClear();
+    delete process.env.APP_COOKIE_SECURE;
+    await expect(unlock({}, form(PASSPHRASE))).rejects.toThrow("REDIRECT:/");
+    expect(cookieSet.mock.calls[0]![2]).toMatchObject({ secure: false });
+  });
+
+  it("marks the cookie Secure when APP_COOKIE_SECURE=true (fronted by HTTPS)", async () => {
+    cookieSet.mockClear();
+    process.env.APP_COOKIE_SECURE = "true";
+    try {
+      await expect(unlock({}, form(PASSPHRASE))).rejects.toThrow("REDIRECT:/");
+      expect(cookieSet.mock.calls[0]![2]).toMatchObject({ secure: true });
+    } finally {
+      delete process.env.APP_COOKIE_SECURE;
+    }
+  });
 });

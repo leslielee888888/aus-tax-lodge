@@ -39,7 +39,11 @@ export async function unlock(_previous: UnlockState, formData: FormData): Promis
   jar.set(SESSION_COOKIE, await sessionTokenFor(expected), {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    // This app is designed to run LAN-only over plain HTTP (the unlock screen
+    // says as much). Browsers silently drop a `Secure` cookie sent over HTTP,
+    // which would trap the user in an unlock loop — so `Secure` is opt-in via
+    // `APP_COOKIE_SECURE=true`, for anyone who fronts the app with HTTPS.
+    secure: process.env.APP_COOKIE_SECURE === "true",
     path: "/",
     maxAge: SESSION_MAX_AGE_SECONDS,
   });
