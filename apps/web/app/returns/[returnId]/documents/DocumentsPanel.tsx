@@ -19,6 +19,7 @@ import {
   ArrowRightIcon,
   FileIcon,
   UploadIcon,
+  XIcon,
 } from "../../../../components/icons";
 import { Field } from "../../../../components/Field";
 import { Input } from "../../../../components/Input";
@@ -110,6 +111,7 @@ export function DocumentsPanel({
   const [extracted, setExtracted] = useState<Map<string, number>>(
     () => new Map(initialExtracted.map((entry) => [entry.docId, entry.figuresCount])),
   );
+  const [removingDocIds, setRemovingDocIds] = useState<ReadonlySet<string>>(new Set());
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadSeq = useRef(0);
@@ -216,6 +218,33 @@ export function DocumentsPanel({
       setDocuments((prev) => prev.map((d) => (d.docId === doc.docId ? document : d)));
     } catch {
       setDocuments(previous);
+    }
+  }
+
+  async function handleRemove(doc: DocumentMetadata) {
+    if (removingDocIds.has(doc.docId)) return;
+    setRemovingDocIds((prev) => new Set(prev).add(doc.docId));
+    try {
+      const res = await fetch(`/api/returns/${returnId}/documents/${doc.docId}`, {
+        method: "DELETE",
+      });
+      if (res.ok || res.status === 404) {
+        setDocuments((prev) => prev.filter((d) => d.docId !== doc.docId));
+        setExtracted((prev) => {
+          if (!prev.has(doc.docId)) return prev;
+          const next = new Map(prev);
+          next.delete(doc.docId);
+          return next;
+        });
+      }
+    } catch {
+      // Leave the row in place — the user can try again.
+    } finally {
+      setRemovingDocIds((prev) => {
+        const next = new Set(prev);
+        next.delete(doc.docId);
+        return next;
+      });
     }
   }
 
@@ -341,6 +370,16 @@ export function DocumentsPanel({
                       ))}
                     </Select>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => void handleRemove(doc)}
+                    disabled={removingDocIds.has(doc.docId) || pending}
+                    aria-label={`Remove ${doc.filename}`}
+                    title="Remove this document"
+                    className="shrink-0 rounded-md p-1.5 text-muted transition-colors hover:bg-surface-2 hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <XIcon className="size-3.5" />
+                  </button>
                 </div>
               );
             })}

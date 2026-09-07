@@ -131,6 +131,34 @@ describe("DocumentsPanel (PRD FR-2, FR-3, §7 step 4)", () => {
     await waitFor(() => expect(select.value).toBe("income-statement"));
   });
 
+  it("removes a document via the DELETE route and drops the row", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+    render(
+      <DocumentsPanel
+        returnId="ret1"
+        expectedRevision={1}
+        initialDocuments={[
+          doc({ filename: "duplicate.pdf" }),
+          doc({ docId: "doc2", filename: "keep.pdf" }),
+        ]}
+        rentalPresent={false}
+        initialExtracted={[]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove duplicate.pdf" }));
+
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/returns/ret1/documents/doc1",
+        expect.objectContaining({ method: "DELETE" }),
+      ),
+    );
+    await waitFor(() => expect(screen.queryByText("duplicate.pdf")).toBeNull());
+    expect(screen.getByText("keep.pdf")).toBeTruthy();
+  });
+
   it("shows a 'kept, not read' note for an unrecognised file", () => {
     render(
       <DocumentsPanel
