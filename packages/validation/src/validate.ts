@@ -19,7 +19,7 @@ import {
   requiredLabels,
   type ReturnModel,
 } from "@aus-tax-lodge/model";
-import { detectOutOfScope } from "@aus-tax-lodge/scope";
+import { detectOutOfScope, type DocumentContentClassification } from "@aus-tax-lodge/scope";
 
 import { isValidBsb } from "./bsb";
 import { collectInScopeFields } from "./fields";
@@ -79,8 +79,17 @@ function readConstructionCost(model: ReturnModel): number | null {
  */
 export function validateReturn(
   model: ReturnModel,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- part of the FR-13 contract; no current check needs it.
+  // Part of the FR-13 contract; no current check needs it. (`no-unused-vars` is
+  // `args: after-used` — a used later param, `contentFindings`, covers this one.)
   assessment?: FullAssessment,
+  /**
+   * T11's document-content scope-check results (PRD FR-20). Optional and
+   * additive — a caller that has them (the web export gate reads them off the
+   * model) gets defense-in-depth: a content-flagged return also fails this
+   * gate. The web review page's hard stop is the effective block; this is a
+   * backstop for any path that reaches export without going through review.
+   */
+  contentFindings?: readonly DocumentContentClassification[],
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
 
@@ -97,7 +106,7 @@ export function validateReturn(
   }
 
   // --- Out-of-scope (PRD FR-13, FR-20) ---------------------------------------
-  for (const finding of detectOutOfScope({ model })) {
+  for (const finding of detectOutOfScope({ model, contentFindings })) {
     issues.push({
       code: `out-of-scope:${finding.code}`,
       severity: "error",
@@ -245,7 +254,11 @@ export function validateReturn(
 
     const interest = model.rental.expenses.interestOnLoans.amount.value;
     const grossRent = model.rental.grossRent.value;
-    if (interest !== null && grossRent !== null && interest > grossRent * LOAN_INTEREST_MAX_MULTIPLE_OF_RENT) {
+    if (
+      interest !== null &&
+      grossRent !== null &&
+      interest > grossRent * LOAN_INTEREST_MAX_MULTIPLE_OF_RENT
+    ) {
       issues.push({
         code: "loan-interest-implausible",
         severity: "warning",

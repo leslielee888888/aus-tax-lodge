@@ -21,6 +21,11 @@ import {
   type RentalSourceDocuments,
   type ReturnModel,
 } from "@aus-tax-lodge/model";
+import {
+  checkDocumentForOutOfScopeContent,
+  documentsNeedingContentCheck,
+  type ScopeVisionPart,
+} from "@aus-tax-lodge/scope";
 
 import { getClaudeClient } from "../../../../lib/ai/client";
 import {
@@ -29,6 +34,11 @@ import {
   withExtractionScratch,
 } from "../../../../lib/extraction-scratch";
 import { getReturnRepository } from "../../../../lib/returns";
+import {
+  readScopeContentScratch,
+  withScopeContentScratch,
+  type ScopeContentClassificationEntry,
+} from "../../../../lib/scope-content-scratch";
 import { getDocumentStore } from "../../../../lib/store";
 
 export interface FailedExtraction {
@@ -110,6 +120,11 @@ function applyManualDepreciation(
   return recomputeNetRentalResult({ ...schedule, expenses });
 }
 
+/** Build the multimodal part for a stored document — mirrors `packages/extraction`'s `visionPartFor`. */
+function scopeVisionPartFor(mimeType: string, bytes: Buffer): ScopeVisionPart {
+  return { kind: mimeType === "application/pdf" ? "pdf" : "image", mimeType, bytes };
+}
+
 function slotSourceType(slot: RentalDocSlot): RentalExpenseSource {
   return slot === "agentStatement"
     ? "agent-statement"
@@ -143,10 +158,16 @@ function countFiguresForSlot(schedule: RentalSchedule, slot: RentalDocSlot): num
  * `assembleRentalSchedule` (PRD FR-24), together with any owner-paid expenses
  * and hand-entered Div 43 / Div 40 totals posted from the documents form.
  *
+ * Every `dividend-statement` / `unrecognised` document also gets T11's Claude
+ * content-level scope check (PRD FR-20) — its result rides along on the model
+ * for the review page to turn into a hard stop. A check that fails is reported
+ * like any other failed document, so the return does not advance as if clean.
+ *
  * A single document's failure is caught and skipped — the rest of the batch,
  * and the save of whatever succeeded, still go ahead (PRD §7 step 4). Only
- * once every currently-outstanding document (rental included) has been
- * processed does this advance `currentStep` to `"review"` and redirect there.
+ * once every currently-outstanding document (rental and content checks
+ * included) has been processed does this advance `currentStep` to `"review"`
+ * and redirect there.
  */
 export async function extractFigures(
   returnId: string,
@@ -255,13 +276,78 @@ export async function extractFigures(
     }
   }
 
-  const nextModel = withExtractionScratch(nextModelBase, {
-    extracted: [...scratch.extracted, ...succeeded],
-    pendingReconciliation: mergePendingReconciliation(
-      scratch.pendingReconciliation,
-      pendingReconciliation,
-    ),
-  });
+  // ---------------------------------------------------------------------------
+  // Document-content out-of-scope check (PRD FR-20, Q12).
+  //
+  // A recognised `dividend-statement` can actually be a trust / managed-fund
+  // distribution, and an `unrecognised` file (which is NOT extractable, so it
+  // never reaches the extract queue above) can be anything. Run T11's one
+  // Claude vision call over each such document that isn't already cached, and
+  // carry the classifications on the model for the review page's
+  // `detectOutOfScope({ contentFindings })` to turn into an FR-20 hard stop.
+  // ---------------------------------------------------------------------------
+  const contentScratch = readScopeContentScratch(currentModel);
+  const cachedContentByDocId = new Map(
+    contentScratch.classifications.map((entry) => [entry.docId, entry]),
+  );
+  const failedDocIds = new Set(failed.map((f) => f.docId));
+  const contentClassifications: ScopeContentClassificationEntry[] = [];
+
+  for (const doc of documentsNeedingContentCheck(
+    documents.map((d) => ({
+      docId: d.docId,
+      detectedType: d.detectedType,
+      filename: d.filename,
+    })),
+  )) {
+    const cached = cachedContentByDocId.get(doc.docId);
+    if (cached && cached.detectedType === doc.detectedType) {
+      // Unchanged since the last run — keep the cached result, no second call.
+      contentClassifications.push(cached);
+      continue;
+    }
+    if (failedDocIds.has(doc.docId)) {
+      // We already couldn't read this file above — don't double-report it.
+      continue;
+    }
+    try {
+      const stored = await documentStore.getDocument(returnId, doc.docId);
+      const classification = await checkDocumentForOutOfScopeContent(
+        {
+          docId: doc.docId,
+          filename: doc.filename,
+          parts: [scopeVisionPartFor(stored.metadata.mimeType, stored.bytes)],
+        },
+        client,
+      );
+      contentClassifications.push({
+        docId: classification.docId,
+        filename: classification.filename,
+        detectedType: doc.detectedType,
+        categories: classification.categories,
+      });
+    } catch (err) {
+      failed.push({
+        docId: doc.docId,
+        filename: doc.filename,
+        reason:
+          err instanceof Error ? err.message : "couldn't check this file for out-of-scope content",
+      });
+    }
+  }
+
+  const nextModel = withScopeContentScratch(
+    withExtractionScratch(nextModelBase, {
+      extracted: [...scratch.extracted, ...succeeded],
+      pendingReconciliation: mergePendingReconciliation(
+        scratch.pendingReconciliation,
+        pendingReconciliation,
+      ),
+    }),
+    // Only documents that still need a check keep an entry — a deleted or
+    // re-typed-away document's stale classification is pruned here.
+    { classifications: contentClassifications },
+  );
 
   const allDone = failed.length === 0;
   const saveResult = await repository.saveReturn(returnId, {
