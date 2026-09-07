@@ -79,6 +79,10 @@ Copy `.env.example` to `.env` (git-ignored — never commit it) and set:
   subscription, via `claude setup-token`; the intended path) **or**
   `ANTHROPIC_API_KEY` (pay-as-you-go). Setting both fails startup; a blank
   `ANTHROPIC_API_KEY` is cleared so it can't shadow the OAuth token.
+- `APP_COOKIE_SECURE` — optional. Leave unset for the default LAN-only,
+  plain-HTTP deployment (a `Secure` session cookie is dropped by browsers over
+  HTTP and would trap you on the unlock screen). Set to `true` only when the app
+  is served over HTTPS.
 
 The loader (`@aus-tax-lodge/config`) validates these at startup and, on anything
 missing or malformed, exits with a one-line message naming the problem. It never
