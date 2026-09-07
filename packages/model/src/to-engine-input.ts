@@ -75,10 +75,11 @@ export function toEngineInput(model: ReturnModel): EngineInput {
   let grossInterest = 0;
   model.income.interestAccounts.forEach((account, i) => {
     const gross = r.num(account.grossInterest, `income.interestAccounts[${i}].grossInterest`);
-    const share = r.num(
-      account.ownershipSharePercent,
-      `income.interestAccounts[${i}].ownershipSharePercent`,
-    );
+    // A settled-but-null ownership share means "not a joint account" — the
+    // taxpayer owns it outright (100%). Falling through to 0 would drop this
+    // account's interest from assessable income entirely.
+    r.require(account.ownershipSharePercent, `income.interestAccounts[${i}].ownershipSharePercent`);
+    const share = account.ownershipSharePercent.value ?? 100;
     grossInterest += gross * (share / 100);
   });
   grossInterest = round2(grossInterest);

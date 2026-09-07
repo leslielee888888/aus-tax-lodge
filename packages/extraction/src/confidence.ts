@@ -65,18 +65,21 @@ export function assignConfidence(
 
 /**
  * The franking-credit plausibility check (PRD FR-3 "format/range check";
- * this task's franking cross-check): a franked dividend's attached franking
- * credit should be roughly 30% of the franked amount (the corporate tax
- * rate most Australian companies frank at). Returns `undefined` when there's
- * nothing to check (no franked amount), `"agrees"` within a tolerance band
- * that absorbs rounding on the statement, `"disagrees"` otherwise.
+ * this task's franking cross-check): for a fully-franked dividend the attached
+ * franking credit is `franked × 30 / 70` — the franked *cash* amount grossed
+ * up at the 30% company tax rate (the same ratio the FR-13 validation gate
+ * uses). Returns `undefined` when there's nothing to check (no franked
+ * amount), `"agrees"` within a tolerance band that absorbs rounding on the
+ * statement and partial franking, `"disagrees"` otherwise.
  */
+const FRANKING_GROSS_UP_RATIO = 30 / 70;
+
 export function frankingCreditCrossCheck(
   franked: number,
   frankingCredits: number,
 ): CrossCheckResult | undefined {
   if (!Number.isFinite(franked) || franked <= 0) return undefined;
-  const expected = franked * 0.3;
+  const expected = franked * FRANKING_GROSS_UP_RATIO;
   const tolerance = Math.max(expected * 0.15, 1);
   return Math.abs(frankingCredits - expected) <= tolerance ? "agrees" : "disagrees";
 }

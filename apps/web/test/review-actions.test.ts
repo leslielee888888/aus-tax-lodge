@@ -1,4 +1,9 @@
-import { needsRepairsConfirmation } from "@aus-tax-lodge/model";
+import {
+  createEmptyInterestAccount,
+  isSettled,
+  needsRepairsConfirmation,
+  propose,
+} from "@aus-tax-lodge/model";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { confirmedField, proposed, readyModel } from "./review-fixtures";
@@ -26,6 +31,7 @@ vi.mock("next/navigation", () => ({
 
 import {
   confirmField,
+  confirmInterestAccount,
   confirmRepairs,
   continueToQuestions,
   deleteReturnAction,
@@ -130,6 +136,35 @@ describe("review server actions (PRD FR-7, FR-13, FR-21, FR-24)", () => {
     const result = await confirmField("ret1", 5, "income.governmentAllowances");
     expect(result.ok).toBe(false);
     expect(result.conflict).toBe(true);
+  });
+
+  it("confirmInterestAccount treats an unset ownership share as sole ownership (100%), not null", async () => {
+    const model = readyModel();
+    const account = {
+      ...createEmptyInterestAccount("acc1"),
+      grossInterest: propose(createEmptyInterestAccount("acc1").grossInterest, 4_000, {
+        kind: "document",
+        docId: "d1",
+        page: 1,
+        snippet: "Interest paid $4,000.00",
+        confidence: "high",
+      }),
+    };
+    // The joint-account question was never asked, so the share is still unset.
+    expect(isSettled(account.ownershipSharePercent)).toBe(false);
+    const next = { ...model, income: { ...model.income, interestAccounts: [account] } };
+    loadReturn.mockResolvedValue({ envelope: envelope(next, 1), readOnly: false });
+    saveReturn.mockImplementation(async (_id, input) => ({
+      conflict: false,
+      envelope: envelope(input.data, 2),
+    }));
+
+    const result = await confirmInterestAccount("ret1", 1, "acc1");
+
+    expect(result.ok).toBe(true);
+    const saved = saveReturn.mock.calls[0]![1].data.income.interestAccounts[0];
+    expect(saved.ownershipSharePercent).toMatchObject({ value: 100, status: "confirmed" });
+    expect(saved.grossInterest.status).toBe("confirmed");
   });
 
   it("confirmRepairs confirms the repair and settles the amount, clearing the gate", async () => {

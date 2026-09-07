@@ -99,13 +99,16 @@ describe("assignConfidence", () => {
 });
 
 describe("frankingCreditCrossCheck", () => {
-  it("agrees when the franking credit is ~30% of the franked amount", () => {
-    expect(frankingCreditCrossCheck(1_000, 300)).toBe("agrees");
-    expect(frankingCreditCrossCheck(1_000, 305)).toBe("agrees"); // within tolerance
+  it("agrees when the franking credit is franked × 30/70 (full franking)", () => {
+    // $1,000 franked cash → $428.57 franking credits.
+    expect(frankingCreditCrossCheck(1_000, 428.57)).toBe("agrees");
+    expect(frankingCreditCrossCheck(1_000, 420)).toBe("agrees"); // within tolerance (partial franking / rounding)
+    expect(frankingCreditCrossCheck(700, 300)).toBe("agrees"); // the fixture ratio
   });
 
-  it("disagrees when the franking credit is far off 30% of the franked amount", () => {
+  it("disagrees when the franking credit is far off franked × 30/70", () => {
     expect(frankingCreditCrossCheck(1_000, 100)).toBe("disagrees");
+    expect(frankingCreditCrossCheck(1_000, 300)).toBe("disagrees"); // the old ×0.3 value is now wrong
   });
 
   it("has nothing to check when there's no franked amount", () => {

@@ -166,7 +166,15 @@ export async function confirmInterestAccount(
   const nextModel = replaceInterestAccount(loaded.model, accountId, (a) => ({
     ...a,
     grossInterest: confirm(a.grossInterest),
-    ownershipSharePercent: confirm(a.ownershipSharePercent),
+    // A bare "Confirm" on an interest-account row means "this account is all
+    // mine" — sole ownership. Confirming an unset share as-is would leave it
+    // `{value: null, status: "confirmed"}`, which `isSettled` accepts, so the
+    // joint-account questionnaire would skip it and `toEngineInput` would read
+    // the share as 0% — silently zeroing that account's interest income.
+    ownershipSharePercent:
+      a.ownershipSharePercent.value == null
+        ? edit(a.ownershipSharePercent, 100)
+        : confirm(a.ownershipSharePercent),
   }));
   return saveModel(returnId, expectedRevision, nextModel);
 }

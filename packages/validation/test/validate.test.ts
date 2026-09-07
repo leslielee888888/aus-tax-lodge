@@ -15,7 +15,13 @@ describe("validateReturn — mandatory labels (PRD FR-13)", () => {
     const base = validReturn();
     const employer = {
       ...base.income.salaryWages[0]!,
-      grossSalaryWages: { value: null, status: "unset" as const, origin: null, proposedValue: null, edits: [] },
+      grossSalaryWages: {
+        value: null,
+        status: "unset" as const,
+        origin: null,
+        proposedValue: null,
+        edits: [],
+      },
     };
     const model = { ...base, income: { ...base.income, salaryWages: [employer] } };
     const issues = validateReturn(model);
@@ -33,9 +39,9 @@ describe("validateReturn — out-of-scope (PRD FR-13, FR-20)", () => {
       context: { ...base.context, residency: conf<"non-resident">("non-resident") },
     };
     const issues = validateReturn(model);
-    expect(issues.some((i) => i.code === "out-of-scope:non-resident" && i.severity === "error")).toBe(
-      true,
-    );
+    expect(
+      issues.some((i) => i.code === "out-of-scope:non-resident" && i.severity === "error"),
+    ).toBe(true);
   });
 });
 
@@ -48,7 +54,11 @@ describe("validateReturn — TFN / BSB (PRD FR-1, FR-13)", () => {
     };
     const issues = validateReturn(model);
     expect(issues).toContainEqual(
-      expect.objectContaining({ code: "tfn-invalid", severity: "error", path: "taxpayer.taxFileNumber" }),
+      expect.objectContaining({
+        code: "tfn-invalid",
+        severity: "error",
+        path: "taxpayer.taxFileNumber",
+      }),
     );
   });
 
@@ -95,6 +105,29 @@ describe("validateReturn — no disallowed negatives (PRD FR-13)", () => {
     };
     const issues = validateReturn(model);
     expect(issues.some((i) => i.code === "negative-amount")).toBe(false);
+  });
+
+  it("flags a negative government-allowances figure", () => {
+    const base = validReturn();
+    const model = { ...base, income: { ...base.income, governmentAllowances: conf(-3_000) } };
+    expect(validateReturn(model)).toContainEqual(
+      expect.objectContaining({
+        code: "negative-amount",
+        severity: "error",
+        path: "income.governmentAllowances",
+      }),
+    );
+  });
+
+  it("flags a negative other-rental-income figure", () => {
+    const base = validReturn();
+    const model = {
+      ...base,
+      rental: { ...base.rental, present: true, otherRentalIncome: conf(-500) },
+    };
+    expect(validateReturn(model)).toContainEqual(
+      expect.objectContaining({ code: "negative-amount", path: "rental.otherRentalIncome" }),
+    );
   });
 });
 
@@ -190,7 +223,13 @@ describe("validateReturn — unconfirmed fields (PRD FR-7, FR-13)", () => {
       ...base,
       taxpayer: {
         ...base.taxpayer,
-        dateOfBirth: { value: null, status: "unset" as const, origin: null, proposedValue: null, edits: [] },
+        dateOfBirth: {
+          value: null,
+          status: "unset" as const,
+          origin: null,
+          proposedValue: null,
+          edits: [],
+        },
       },
     };
     const issues = validateReturn(model);
