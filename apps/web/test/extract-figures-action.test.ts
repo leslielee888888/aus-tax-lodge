@@ -41,10 +41,8 @@ vi.mock("next/navigation", () => ({
 
 import { detectOutOfScope, isBlocked } from "@aus-tax-lodge/scope";
 
-import {
-  extractFigures,
-  INITIAL_EXTRACT_FIGURES_STATE,
-} from "../app/returns/[returnId]/documents/actions";
+import { extractFigures } from "../app/returns/[returnId]/documents/actions";
+import { INITIAL_EXTRACT_FIGURES_STATE } from "../app/returns/[returnId]/documents/state";
 import { scopeContentFindings } from "../lib/scope-content-scratch";
 
 function fakeDoc(overrides: Partial<Record<string, unknown>> = {}) {

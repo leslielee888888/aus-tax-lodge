@@ -47,10 +47,8 @@ vi.mock("next/navigation", () => ({
   },
 }));
 
-import {
-  extractFigures,
-  INITIAL_EXTRACT_FIGURES_STATE,
-} from "../app/returns/[returnId]/documents/actions";
+import { extractFigures } from "../app/returns/[returnId]/documents/actions";
+import { INITIAL_EXTRACT_FIGURES_STATE } from "../app/returns/[returnId]/documents/state";
 
 function rentalDoc(docId: string, detectedType: string, filename: string) {
   return {

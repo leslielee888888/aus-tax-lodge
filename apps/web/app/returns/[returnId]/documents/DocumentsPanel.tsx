@@ -29,7 +29,8 @@ import {
   looksLikeAcceptedUpload,
 } from "../../../../lib/document-types";
 import type { ExtractedDocumentSummary } from "../../../../lib/extraction-scratch";
-import { extractFigures, INITIAL_EXTRACT_FIGURES_STATE, type ExtractFiguresState } from "./actions";
+import { extractFigures } from "./actions";
+import { INITIAL_EXTRACT_FIGURES_STATE, type ExtractFiguresState } from "./state";
 
 export interface DocumentsPanelProps {
   readonly returnId: string;
