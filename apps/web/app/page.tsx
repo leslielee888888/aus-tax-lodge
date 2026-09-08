@@ -1,5 +1,4 @@
 import { PARAMS_VERSION, TARGET_YEAR } from "@aus-tax-lodge/params";
-import type { ReturnSummary } from "@aus-tax-lodge/store";
 
 import Link from "next/link";
 
@@ -11,7 +10,7 @@ import { ReturnsList } from "../components/ReturnsList";
 import { TopBar } from "../components/TopBar";
 import { formatIncomeYear } from "../lib/format";
 import { maybePurgeExportedDocuments } from "../lib/purge";
-import { getReturnRepository } from "../lib/returns";
+import { listReturnsWithConversation, type ReturnListItem } from "../lib/returns";
 
 // Read fresh on every request — a return the user just created must show up.
 export const dynamic = "force-dynamic";
@@ -25,9 +24,9 @@ export default async function ReturnsPage() {
     console.error("retention sweep failed", error);
   }
 
-  let returns: ReturnSummary[] | null = null;
+  let returns: ReturnListItem[] | null = null;
   try {
-    returns = await getReturnRepository().listReturns();
+    returns = await listReturnsWithConversation();
   } catch (error) {
     console.error("failed to list returns", error);
   }
@@ -68,7 +67,7 @@ export default async function ReturnsPage() {
             </p>
           </Card>
         ) : (
-          <ReturnsList returns={returns} />
+          <ReturnsList items={returns} />
         )}
 
         <p className="mt-4 text-[11px] leading-relaxed text-muted">
