@@ -52,14 +52,28 @@ describe("readConversation", () => {
         version: CONVERSATION_STATE_VERSION,
         turns: "not-an-array",
         phase: "banana",
-        pendingConfirmations: [{ nope: true }, { id: "keep-me" }],
+        pendingConfirmations: [
+          { nope: true },
+          { id: "pc:income.governmentAllowances", modelPath: "income.governmentAllowances" },
+        ],
       },
     } as never;
     const state = readConversation(partialBlock);
     expect(state.turns).toEqual([]);
     expect(state.phase).toBe("upload");
     expect(state.place).toBeNull();
-    expect(state.pendingConfirmations).toEqual([{ id: "keep-me" }]);
+    // A block with no path at all is dropped; a partial one is filled with defaults.
+    expect(state.pendingConfirmations).toEqual([
+      {
+        id: "pc:income.governmentAllowances",
+        modelPath: "income.governmentAllowances",
+        label: "income.governmentAllowances",
+        value: null,
+        source: "the return so far",
+        reason: "plausibility",
+        resolved: false,
+      },
+    ]);
   });
 
   it("drops individual malformed turns without throwing", () => {
@@ -238,9 +252,13 @@ describe("conversation persistence (PRD FR-12)", () => {
       place: "work-from-home deductions",
       pendingConfirmations: [
         {
-          id: "pc-1",
-          modelPath: "income.interestAccounts.0.grossInterest",
+          id: "pc:income.interestAccounts[0].grossInterest",
+          modelPath: "income.interestAccounts[0].grossInterest",
+          label: "Gross interest — Southbank Mutual",
+          value: 820,
+          source: "you told me",
           reason: "user-corrected",
+          resolved: false,
         },
       ],
     };
@@ -260,9 +278,13 @@ describe("conversation persistence (PRD FR-12)", () => {
     expect(reloaded.conversation.place).toBe("work-from-home deductions");
     expect(reloaded.conversation.pendingConfirmations).toEqual([
       {
-        id: "pc-1",
-        modelPath: "income.interestAccounts.0.grossInterest",
+        id: "pc:income.interestAccounts[0].grossInterest",
+        modelPath: "income.interestAccounts[0].grossInterest",
+        label: "Gross interest — Southbank Mutual",
+        value: 820,
+        source: "you told me",
         reason: "user-corrected",
+        resolved: false,
       },
     ]);
 

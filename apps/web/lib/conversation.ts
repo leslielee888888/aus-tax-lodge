@@ -116,18 +116,37 @@ export type ConversationTurnInput = DistributiveOmit<ConversationTurn, "id" | "a
 export type ConversationPhase = "upload" | "interview" | "review" | "exported" | "stopped";
 
 /**
- * A figure flagged for the final review checkpoint (PRD FR-5). T5 fills these
- * in as the interview runs; T1 only defines the slot and persists it.
+ * Why a figure was flagged for explicit confirmation (PRD FR-5, Q2):
+ * - `low-confidence` — the figure's `Provenanced` document origin carries a
+ *   `medium` / `low` / `unverified` confidence (v1 FR-3).
+ * - `plausibility` — a `validateReturn` warning or error names the figure's path.
+ * - `user-corrected` — the user typed or changed the figure in the chat
+ *   (the `Provenanced` field has an edit trail).
+ */
+export type ConfirmationReason = "low-confidence" | "plausibility" | "user-corrected";
+
+/**
+ * A figure the assistant must check explicitly before it counts as confirmed
+ * (PRD FR-5). {@link import("./confirmations").collectPendingConfirmations}
+ * derives the list deterministically from the model + the `validateReturn`
+ * result after every model change; the `confirm-figure` card (mid-interview)
+ * and T8's final review both read it.
  */
 export interface PendingConfirmation {
-  /** Stable id for the flagged item. */
+  /** Stable, deterministic id — `pc:<modelPath>`, so a recompute merges by id. */
   readonly id: string;
-  /** The model path / label the figure lives at (loose until T5). */
-  readonly modelPath?: string;
-  /** Why it was flagged — `medium`/`low`/`unverified` confidence, a `validateReturn` warning, user-corrected. */
-  readonly reason?: string;
-  /** Card-specific detail for the review summary — shape owned by T5/T8. */
-  readonly detail?: unknown;
+  /** Dot-path of the figure, e.g. `income.interestAccounts[0].grossInterest`. */
+  readonly modelPath: string;
+  /** Plain-English name, e.g. `"Gross interest — Southbank Mutual"`. */
+  readonly label: string;
+  /** The figure's current value, or `null` when it has none. */
+  readonly value: number | null;
+  /** Where the figure came from, e.g. `"your pre-fill report"` / `"you told me"`. */
+  readonly source: string;
+  /** Why it was flagged. */
+  readonly reason: ConfirmationReason;
+  /** `true` once the user has confirmed or corrected it via a `confirm-figure` card. */
+  readonly resolved: boolean;
 }
 
 export interface ConversationState {
@@ -206,8 +225,38 @@ function isTurn(value: unknown): value is ConversationTurn {
   return false;
 }
 
-function isPendingConfirmation(value: unknown): value is PendingConfirmation {
-  return isRecord(value) && typeof value.id === "string";
+const CONFIRMATION_REASONS: readonly ConfirmationReason[] = [
+  "low-confidence",
+  "plausibility",
+  "user-corrected",
+];
+
+/**
+ * Coerce a stored value into a {@link PendingConfirmation}, or `null` when it is
+ * too malformed to keep. Defensive: a partial block (an older T1-shaped
+ * `{ id, modelPath?, reason? }`) is filled with sane defaults rather than
+ * dropped, so a resume never loses a flag.
+ */
+function coercePendingConfirmation(value: unknown): PendingConfirmation | null {
+  if (!isRecord(value)) return null;
+  const modelPath =
+    typeof value.modelPath === "string" && value.modelPath !== ""
+      ? value.modelPath
+      : typeof value.id === "string"
+        ? value.id.replace(/^pc:/, "")
+        : null;
+  if (!modelPath) return null;
+  return {
+    id: typeof value.id === "string" && value.id !== "" ? value.id : `pc:${modelPath}`,
+    modelPath,
+    label: typeof value.label === "string" ? value.label : modelPath,
+    value: typeof value.value === "number" ? value.value : null,
+    source: typeof value.source === "string" ? value.source : "the return so far",
+    reason: CONFIRMATION_REASONS.includes(value.reason as ConfirmationReason)
+      ? (value.reason as ConfirmationReason)
+      : "plausibility",
+    resolved: value.resolved === true,
+  };
 }
 
 /**
@@ -227,7 +276,9 @@ function coerceConversation(raw: unknown): ConversationState {
     phase: isPhase(raw.phase) ? raw.phase : "upload",
     place: typeof raw.place === "string" ? raw.place : null,
     pendingConfirmations: Array.isArray(raw.pendingConfirmations)
-      ? raw.pendingConfirmations.filter(isPendingConfirmation)
+      ? raw.pendingConfirmations
+          .map(coercePendingConfirmation)
+          .filter((c): c is PendingConfirmation => c !== null)
       : [],
     stoppedReason: typeof raw.stoppedReason === "string" ? raw.stoppedReason : null,
   };

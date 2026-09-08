@@ -2,6 +2,7 @@ import { classifyDocument } from "@aus-tax-lodge/ai";
 import { applyExtractions, extractDocument } from "@aus-tax-lodge/extraction";
 
 import { getClaudeClient } from "../../../../../lib/ai/client";
+import { recomputePendingConfirmations } from "../../../../../lib/confirmations";
 import { appendTurn, type ConversationState } from "../../../../../lib/conversation";
 import { ingestUploads } from "../../../../../lib/documents";
 import {
@@ -125,15 +126,22 @@ export async function POST(request: Request, { params }: RouteContext): Promise<
       ),
     });
 
+    // Flag the doubtful figures now (PRD FR-5) so the income checkpoint and
+    // T8's review both have them.
+    const pendingConfirmations = recomputePendingConfirmations(
+      seeded,
+      conversation.pendingConfirmations,
+    );
+
     let next = appendTurn(withFile, {
       role: "assistant",
       kind: "message",
       text: summariseIncomeFound(seeded),
     });
-    next = { ...next, phase: "interview" };
+    next = { ...next, phase: "interview", pendingConfirmations };
 
     const step = await nextTurn({ model: seeded, conversation: next, client });
-    next = applyInterviewStep(next, step);
+    next = applyInterviewStep(next, step, { model: seeded, pendingConfirmations });
 
     const result = await save(next, seededWithScratch);
     return json({ ...result, ok: true }, 200);
@@ -162,7 +170,11 @@ async function persist(
   expectedRevision: number,
 ): Promise<PersistResult> {
   try {
-    const result = await saveConversation(returnId, { model, conversation: next, expectedRevision });
+    const result = await saveConversation(returnId, {
+      model,
+      conversation: next,
+      expectedRevision,
+    });
     if (result.conflict) {
       const fresh = await loadConversation(returnId);
       return {

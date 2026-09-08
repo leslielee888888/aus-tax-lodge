@@ -51,7 +51,8 @@ describe("ChatTranscript (PRD FR-1, FR-12)", () => {
         at: "t",
         role: "assistant",
         kind: "card",
-        card: { type: "income-checkpoint" },
+        // A card type no task has built a body for yet — still the placeholder shell.
+        card: { type: "reconcile" },
       }),
     ];
 
@@ -62,10 +63,10 @@ describe("ChatTranscript (PRD FR-1, FR-12)", () => {
     expect(text.indexOf("Hello from the assistant")).toBeLessThan(text.indexOf("Hi back"));
     expect(text.indexOf("Hi back")).toBeLessThan(text.indexOf("prefill-2025-26.pdf"));
     expect(text.indexOf("prefill-2025-26.pdf")).toBeLessThan(
-      text.indexOf("Review the income from your pre-fill report"),
+      text.indexOf("Two sources disagree — which is right?"),
     );
 
-    const card = container.querySelector('[data-card-type="income-checkpoint"]');
+    const card = container.querySelector('[data-card-type="reconcile"]');
     expect(card).not.toBeNull();
     expect(card?.textContent).toMatch(/handled later in the interview/i);
   });
