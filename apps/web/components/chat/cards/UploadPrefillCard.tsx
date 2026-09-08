@@ -20,6 +20,10 @@ import type { CardProps } from "./types";
  * in the returned transcript). An `out-of-scope` response is a hard stop
  * (PRD FR-9): the zone locks and the new `out-of-scope` card + hidden composer
  * in the re-rendered transcript carry the rest.
+ *
+ * FR-14 — a `rateLimited` response is a resumable pause: the zone stays fully
+ * usable and a calm `role="status"` note (not the red `role="alert"`) tells the
+ * user to try again shortly.
  */
 type Phase = "idle" | "uploading" | "reading" | "accepted" | "error" | "stopped";
 
@@ -29,6 +33,7 @@ interface PrefillResponse {
   readonly conversation?: ConversationState;
   readonly revision?: number;
   readonly error?: string;
+  readonly rateLimited?: boolean;
 }
 
 function helpCopy(payload: unknown): { where: string; freshnessNote: string } {
@@ -47,6 +52,8 @@ export function UploadPrefillCard({ returnId, turn, readOnly, onResult }: CardPr
   const [phase, setPhase] = useState<Phase>("idle");
   const [dragActive, setDragActive] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  /** FR-14 — a rate-limit pause note, shown calm (not as a hard error). */
+  const [pausedNote, setPausedNote] = useState<string | null>(null);
 
   const { where, freshnessNote } = helpCopy(turn.card.payload);
   const busy = phase === "uploading" || phase === "reading";
@@ -55,6 +62,7 @@ export function UploadPrefillCard({ returnId, turn, readOnly, onResult }: CardPr
 
   async function submit(file: File) {
     setMessage(null);
+    setPausedNote(null);
     setPhase("uploading");
 
     const body = new FormData();
@@ -90,6 +98,16 @@ export function UploadPrefillCard({ returnId, turn, readOnly, onResult }: CardPr
 
     if (payload.ok) {
       setPhase("accepted");
+      return;
+    }
+
+    if (payload.rateLimited) {
+      // FR-14 — a resumable pause. Keep the zone usable; the assistant's plain
+      // explanation is already in the transcript.
+      setPhase("idle");
+      setPausedNote(
+        "Paused — Claude's usage limit. Your progress is saved. Try the upload again in a little while.",
+      );
       return;
     }
 
@@ -186,6 +204,15 @@ export function UploadPrefillCard({ returnId, turn, readOnly, onResult }: CardPr
         {message ? (
           <p role="alert" className="mt-3 text-[12.5px] font-medium text-danger">
             {message}
+          </p>
+        ) : null}
+
+        {pausedNote ? (
+          <p
+            role="status"
+            className="mt-3 rounded-lg border border-warn bg-warn-soft px-3 py-2 text-[12.5px] font-medium text-warn"
+          >
+            {pausedNote}
           </p>
         ) : null}
 

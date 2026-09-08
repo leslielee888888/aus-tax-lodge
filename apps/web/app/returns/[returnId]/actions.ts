@@ -8,6 +8,7 @@ import { resolveReconciliation } from "@aus-tax-lodge/extraction";
 import { buildLodgeInstructionsData } from "@aus-tax-lodge/export";
 
 import { getClaudeClient } from "../../../lib/ai/client";
+import { classifyConversationFailure, type ConversationFailure } from "../../../lib/ai/failure";
 import { maybeRunningEstimate } from "../../../lib/estimate/running-estimate";
 import {
   acknowledgeWarnings,
@@ -68,12 +69,17 @@ import {
  * - **`stopped` / `review` / `exported`** — the chat isn't taking free input;
  *   say so.
  *
- * A Claude/scope throw is caught and turned into a plain "try again" message
- * with the confirmed model untouched — T10 hardens this further.
+ * A Claude / scope-check / extraction throw is caught and classified by
+ * {@link classifyConversationFailure} (FR-14) into a plain assistant message —
+ * the confirmed model is persisted **unchanged**, so nothing proceeds as if a
+ * failed step succeeded, and the user retries the step. A rate limit (429) is a
+ * resumable pause: the exchange is still recorded, {@link SendMessageResult}
+ * carries `rateLimited` so the UI shows a calm "paused" note, and the user just
+ * resends once the limit clears.
  */
 
-const PROBLEM_REPLY =
-  "I hit a problem working through that just now — send it again and I'll pick it back up.";
+const RATE_LIMIT_INLINE_NOTE =
+  "Paused — Claude's usage limit. Your progress is saved. Resend your message in a little while.";
 
 const REVIEW_CANNED_REPLY =
   "We're at the review stage — use the summary above to approve your return or reopen a line. " +
@@ -109,6 +115,12 @@ export interface SendMessageResult {
   readonly conflict?: boolean;
   /** A plain-language problem to show inline; the conversation is unchanged. */
   readonly error?: string;
+  /**
+   * FR-14 — the step hit Claude's rate limit. A resumable pause, distinct from a
+   * hard error: the exchange is still recorded, the phase is unchanged, and the
+   * user just resends shortly. The UI styles this as a calm "paused" note.
+   */
+  readonly rateLimited?: boolean;
 }
 
 export async function sendMessage(
@@ -187,6 +199,22 @@ export async function sendMessage(
   const say = (next: ConversationState, text: string): ConversationState =>
     appendTurn(next, { role: "assistant", kind: "message", text });
 
+  /**
+   * Persist a failed step (FR-14): the assistant's plain message is already on
+   * `next`, and `failModel` is the pre-attempt model — persisted unchanged so
+   * nothing proceeds as if the step succeeded. A rate limit also surfaces the
+   * inline "paused" note + `rateLimited` flag.
+   */
+  const persistFailure = async (
+    next: ConversationState,
+    failModel: ReturnModel,
+    failure: ConversationFailure,
+  ): Promise<SendMessageResult> => {
+    const result = await persist(next, failModel);
+    if (result.conflict || !failure.resumablePause) return result;
+    return { ...result, error: RATE_LIMIT_INLINE_NOTE, rateLimited: true };
+  };
+
   // --- Review phase: a running-estimate question or a free-text correction ---
   // (PRD FR-10, FR-11). A clear correction re-issues the whole-return summary;
   // anything else points back to the summary already on screen.
@@ -198,8 +226,9 @@ export async function sendMessage(
     let applied: Awaited<ReturnType<typeof applyUserTurn>>;
     try {
       applied = await applyUserTurn({ model, conversation, text: trimmed, client });
-    } catch {
-      return persist(say(withUser, REVIEW_CANNED_REPLY), model);
+    } catch (err) {
+      const failure = classifyConversationFailure(err, { step: "answer" });
+      return persistFailure(say(withUser, failure.assistantMessage), model, failure);
     }
 
     if (applied.outOfScope && applied.outOfScope.length > 0) {
@@ -259,11 +288,11 @@ export async function sendMessage(
   let applied: Awaited<ReturnType<typeof applyUserTurn>>;
   try {
     applied = await applyUserTurn({ model, conversation, text: trimmed, client });
-  } catch {
-    return persist(
-      appendTurn(withUser, { role: "assistant", kind: "message", text: PROBLEM_REPLY }),
-      model,
-    );
+  } catch (err) {
+    // FR-14 — the answer step (field mapping + scope detection) failed. Persist
+    // the loaded model unchanged; the user retries by resending.
+    const failure = classifyConversationFailure(err, { step: "answer" });
+    return persistFailure(say(withUser, failure.assistantMessage), model, failure);
   }
 
   if (applied.outOfScope && applied.outOfScope.length > 0) {
@@ -297,14 +326,19 @@ export async function sendMessage(
   let step: Awaited<ReturnType<typeof nextTurn>>;
   try {
     step = await nextTurn({ model: nextModel, conversation: withUserPending, client });
-  } catch {
-    return persist(
+  } catch (err) {
+    // FR-14 — `applyUserTurn` succeeded (its field writes stand), but picking the
+    // next question failed. Persist the applied model + the plain message; the
+    // user resends to get the next question.
+    const failure = classifyConversationFailure(err, { step: "answer" });
+    return persistFailure(
       appendTurn(withUserPending, {
         role: "assistant",
         kind: "message",
-        text: "I've noted that — send another message and I'll carry on with the next question.",
+        text: failure.assistantMessage,
       }),
       nextModel,
+      failure,
     );
   }
 
@@ -407,6 +441,36 @@ async function persistCardTurn(
 }
 
 /**
+ * FR-14 for the card path: persist a failed step's plain message with the
+ * pre-attempt `model` unchanged, and flag a rate limit as a resumable pause.
+ */
+async function persistCardFailure(
+  returnId: string,
+  expectedRevision: number,
+  loaded: LoadedConversation,
+  next: ConversationState,
+  model: ReturnModel,
+  failure: ConversationFailure,
+): Promise<SendMessageResult> {
+  const result = await persistCardTurn(returnId, expectedRevision, loaded, next, model);
+  if (result.conflict || !failure.resumablePause) return result;
+  return { ...result, error: RATE_LIMIT_INLINE_NOTE, rateLimited: true };
+}
+
+/** A card-action failure that is shown inline only — the conversation is untouched. */
+function cardInlineFailure(
+  loaded: LoadedConversation,
+  failure: ConversationFailure,
+): SendMessageResult {
+  return {
+    conversation: loaded.conversation,
+    revision: loaded.envelope.revision,
+    error: failure.resumablePause ? RATE_LIMIT_INLINE_NOTE : failure.assistantMessage,
+    ...(failure.resumablePause ? { rateLimited: true } : {}),
+  };
+}
+
+/**
  * Shared tail of every card action: recompute the flagged figures (PRD FR-5),
  * ask `nextTurn` for the assistant's next move, fold it into the transcript and
  * persist. `base` already carries the card-response turn (and any `resolved`
@@ -426,17 +490,21 @@ async function advanceInterview(
   let step: Awaited<ReturnType<typeof nextTurn>>;
   try {
     step = await nextTurn({ model, conversation: withPending, client });
-  } catch {
-    return persistCardTurn(
+  } catch (err) {
+    // FR-14 — the card's write already stands on `model`; only picking the next
+    // question failed. Persist the plain message + `model` unchanged.
+    const failure = classifyConversationFailure(err, { step: "card" });
+    return persistCardFailure(
       returnId,
       expectedRevision,
       loaded,
       appendTurn(withPending, {
         role: "assistant",
         kind: "message",
-        text: "Got it — send another message and I'll carry on with the next question.",
+        text: failure.assistantMessage,
       }),
       model,
+      failure,
     );
   }
 
@@ -507,12 +575,8 @@ export async function correctIncome(
     for (const correction of valid) {
       model = editFieldAtPath(model, correction.modelPath, correction.value);
     }
-  } catch {
-    return {
-      conversation: loaded.conversation,
-      revision: loaded.envelope.revision,
-      error: "I couldn't apply that change — try again.",
-    };
+  } catch (err) {
+    return cardInlineFailure(loaded, classifyConversationFailure(err, { step: "card" }));
   }
   model = confirmProposedIncome(model);
 
@@ -567,12 +631,8 @@ export async function resolveConfirmation(
     model = input.accept
       ? confirmFieldAtPath(model, target.modelPath)
       : editFieldAtPath(model, target.modelPath, newValue as number);
-  } catch {
-    return {
-      conversation: loaded.conversation,
-      revision: loaded.envelope.revision,
-      error: "I couldn't apply that just now — try again.",
-    };
+  } catch (err) {
+    return cardInlineFailure(loaded, classifyConversationFailure(err, { step: "card" }));
   }
 
   const resolved: PendingConfirmation[] = confirmations.map((c) =>
@@ -673,12 +733,8 @@ export async function resolveReconcile(
       ...scratch,
       pendingReconciliation: mergePendingReconciliation([], unresolved),
     });
-  } catch {
-    return {
-      conversation: loaded.conversation,
-      revision: loaded.envelope.revision,
-      error: "I couldn't apply that just now — try again.",
-    };
+  } catch (err) {
+    return cardInlineFailure(loaded, classifyConversationFailure(err, { step: "card" }));
   }
 
   const base = appendTurn(loaded.conversation, {

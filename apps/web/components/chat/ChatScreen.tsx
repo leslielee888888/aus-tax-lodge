@@ -16,6 +16,12 @@ import { ChatTranscript } from "./ChatTranscript";
  *
  * The composer is replaced by a short note when the return is read-only (retired
  * params — FR-12) or the conversation has stopped (FR-9, hard stop card in T7).
+ *
+ * FR-14 — a failed step (Claude error, extraction failure, incomplete scope
+ * check) shows as a plain assistant message in the transcript with the composer
+ * still live to retry. A **rate limit** additionally raises a calm amber
+ * `role="status"` "paused" note (distinct from the red `role="alert"` error):
+ * the user's progress is saved and they just resend shortly.
  */
 export interface ChatScreenProps {
   readonly returnId: string;
@@ -29,6 +35,15 @@ const LOCKED_NOTE =
   "This return is locked — it was prepared under tax rules that have since been retired. You can read the conversation, but it can't be changed.";
 const STOPPED_NOTE = "This conversation has stopped and can't continue here.";
 
+/**
+ * FR-14 — a rate limit is a resumable pause, not a failure. The transcript
+ * already carries the assistant's plain-language explanation; this calm amber
+ * note (vs. the red error) reassures the user their place is kept and the
+ * composer is still live. It clears on the next successful turn.
+ */
+const PAUSED_NOTE =
+  "Paused — Claude's usage limit. Your progress is saved. Resend your message in a little while.";
+
 export function ChatScreen({
   returnId,
   initialConversation,
@@ -39,6 +54,8 @@ export function ChatScreen({
   const [revision, setRevision] = useState(initialRevision);
   const [conflict, setConflict] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** FR-14 — set when the last turn hit Claude's rate limit (a resumable pause). */
+  const [paused, setPaused] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   const [optimisticConversation, addOptimisticMessage] = useOptimistic(
@@ -67,17 +84,20 @@ export function ChatScreen({
     setConflict(false);
     setConversation(result.conversation);
     setRevision(result.revision);
+    setPaused(result.rateLimited === true);
   }
 
   function handleSend(text: string) {
     setError(null);
     setConflict(false);
+    setPaused(false);
     startTransition(async () => {
       addOptimisticMessage(text);
       const result = await sendMessage(returnId, revision, text);
       setConversation(result.conversation);
       setRevision(result.revision);
       if (result.conflict) setConflict(true);
+      else if (result.rateLimited) setPaused(true);
       else if (result.error) setError(result.error);
     });
   }
@@ -111,12 +131,21 @@ export function ChatScreen({
         </p>
       ) : null}
 
-      {error && !conflict ? (
+      {error && !conflict && !paused ? (
         <p
           role="alert"
           className="mb-3 rounded-lg border border-danger bg-danger-soft px-3 py-2 text-xs font-medium text-danger"
         >
           {error}
+        </p>
+      ) : null}
+
+      {paused && !conflict ? (
+        <p
+          role="status"
+          className="mb-3 rounded-lg border border-warn bg-warn-soft px-3 py-2 text-xs font-medium text-warn"
+        >
+          {PAUSED_NOTE}
         </p>
       ) : null}
 

@@ -79,7 +79,12 @@ describe("UploadPrefillCard (PRD FR-1)", () => {
   it("surfaces a wrong-type response and keeps the zone usable", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
-        JSON.stringify({ ok: false, reason: "wrong-type", conversation: { turns: [] }, revision: 5 }),
+        JSON.stringify({
+          ok: false,
+          reason: "wrong-type",
+          conversation: { turns: [] },
+          revision: 5,
+        }),
         { status: 200, headers: { "content-type": "application/json" } },
       ),
     );
@@ -98,5 +103,32 @@ describe("UploadPrefillCard (PRD FR-1)", () => {
   it("disables the input when read-only", () => {
     renderCard({ readOnly: true });
     expect((document.querySelector('input[type="file"]') as HTMLInputElement).disabled).toBe(true);
+  });
+
+  it("shows a calm role=status pause note (not a hard failure) on a rate-limited upload (FR-14)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          ok: false,
+          reason: "unreadable",
+          rateLimited: true,
+          conversation: { turns: [] },
+          revision: 5,
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+
+    renderCard();
+    fireEvent.change(document.querySelector('input[type="file"]') as HTMLInputElement, {
+      target: { files: [pdf()] },
+    });
+
+    const status = await screen.findByRole("status");
+    expect(status.textContent).toMatch(/paused/i);
+    expect(screen.queryByRole("alert")).toBeNull();
+    // The drop zone stays usable.
+    expect((document.querySelector('input[type="file"]') as HTMLInputElement).disabled).toBe(false);
+    expect(screen.getByText(/drag your pre-fill report here/i)).toBeTruthy();
   });
 });

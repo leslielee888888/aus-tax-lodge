@@ -35,6 +35,12 @@ export interface CardResult {
   readonly conversation: ConversationState;
   /** The `revision` the next {@link import("../../../app/returns/[returnId]/actions").sendMessage} should send. */
   readonly revision: number;
+  /**
+   * FR-14 — the card's step hit Claude's rate limit: a resumable pause, not a
+   * hard error. `ChatScreen` shows a calm "paused" note and keeps the composer
+   * live; the user retries shortly.
+   */
+  readonly rateLimited?: boolean;
 }
 
 export interface CardProps {
@@ -48,6 +54,4 @@ export interface CardProps {
 
 export type CardComponent = ComponentType<CardProps>;
 
-export type CardComponentMap = Partial<
-  Record<AssistantCardTurn["card"]["type"], CardComponent>
->;
+export type CardComponentMap = Partial<Record<AssistantCardTurn["card"]["type"], CardComponent>>;

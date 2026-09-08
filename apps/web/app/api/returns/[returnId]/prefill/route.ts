@@ -2,6 +2,7 @@ import { classifyDocument } from "@aus-tax-lodge/ai";
 import { applyExtractions, extractDocument } from "@aus-tax-lodge/extraction";
 
 import { getClaudeClient } from "../../../../../lib/ai/client";
+import { classifyConversationFailure } from "../../../../../lib/ai/failure";
 import { recomputePendingConfirmations } from "../../../../../lib/confirmations";
 import { appendTurn, type ConversationState } from "../../../../../lib/conversation";
 import { ingestUploads } from "../../../../../lib/documents";
@@ -44,9 +45,14 @@ interface RouteContext {
  * - **out of scope** → the interview does not open: an `out-of-scope` card turn
  *   is appended, `phase` → `stopped`, and the **loaded (pre-extraction) model**
  *   is persisted, not the seeded one (PRD FR-9). `{ ok:false, reason:"out-of-scope" }`.
- * - **extraction / Claude throws** → the assistant says it couldn't read the
- *   file, `phase` stays `upload`. `{ ok:false, reason:"unreadable" }`. (T10
- *   hardens the failure path; here it just must not crash or advance.)
+ * - **extraction / Claude throws** (FR-14) → the assistant says it couldn't
+ *   read the file in plain language, `phase` stays `upload`, the loaded model is
+ *   persisted unchanged. `{ ok:false, reason:"unreadable", rateLimited }` — a
+ *   429 sets `rateLimited:true` (a resumable pause).
+ * - **the scope check can't complete** (FR-14) → the interview does NOT open
+ *   (the assistant never assumes in-scope): `phase` stays `upload`, the loaded
+ *   model is kept, a plain message is appended.
+ *   `{ ok:false, reason:"scope-check-failed", rateLimited }`.
  *
  * Every response body carries `{ conversation, revision }` so the drop-zone
  * card can advance the transcript in place.
@@ -121,14 +127,39 @@ export async function POST(request: Request, { params }: RouteContext): Promise<
     const { model: seededBase, pendingReconciliation } = applyExtractions(model, [extraction]);
 
     // Out-of-scope gate on the seeded model + the uploaded document(s)
-    // (PRD FR-8 "on every ... document", FR-20). Deterministic — Claude never
-    // raises the stop. `seeded` carries the refreshed document content-cache.
-    const { findings, model: seeded } = await checkModelInScope({
-      returnId,
-      model: seededBase,
-      store,
-      visionClient: client,
-    });
+    // (PRD FR-8 "on every ... document", FR-20). `seeded` carries the refreshed
+    // document content-cache.
+    //
+    // FR-14 — if the scope check can't complete, the interview does NOT open:
+    // the assistant must never assume the return is in scope. Stay in `upload`
+    // with the loaded model, say so plainly, and let the user resend.
+    let scoped: Awaited<ReturnType<typeof checkModelInScope>>;
+    try {
+      scoped = await checkModelInScope({
+        returnId,
+        model: seededBase,
+        store,
+        visionClient: client,
+      });
+    } catch (err) {
+      const failure = classifyConversationFailure(err, { step: "scope-check" });
+      const said = appendTurn(withFile, {
+        role: "assistant",
+        kind: "message",
+        text: failure.assistantMessage,
+      });
+      const result = await save(said);
+      return json(
+        {
+          ...result,
+          ok: false,
+          reason: "scope-check-failed" as const,
+          rateLimited: failure.resumablePause,
+        },
+        200,
+      );
+    }
+    const { findings, model: seeded } = scoped;
 
     if (findings.length > 0) {
       let stopped = appendTurn(withFile, {
@@ -173,14 +204,27 @@ export async function POST(request: Request, { params }: RouteContext): Promise<
 
     const result = await save(next, seededWithScratch);
     return json({ ...result, ok: true }, 200);
-  } catch {
+  } catch (err) {
+    // FR-14 — extraction / Claude failed. `phase` stays `upload`, the loaded
+    // model is persisted unchanged (nothing proceeds as if it succeeded), and
+    // the assistant says so in plain language. A 429 is flagged a resumable
+    // pause via `rateLimited`.
+    const failure = classifyConversationFailure(err, { step: "extraction" });
     const said = appendTurn(withFile, {
       role: "assistant",
       kind: "message",
-      text: "I couldn't read that file just now — try uploading it again.",
+      text: failure.assistantMessage,
     });
     const result = await save(said);
-    return json({ ...result, ok: false, reason: "unreadable" as const }, 200);
+    return json(
+      {
+        ...result,
+        ok: false,
+        reason: "unreadable" as const,
+        rateLimited: failure.resumablePause,
+      },
+      200,
+    );
   }
 }
 
