@@ -51,11 +51,37 @@ export const NEXT_TURN_SYSTEM = [
   '  "review-summary" — the interview is done.',
 ].join("\n");
 
+/**
+ * If the last user turn reopened the review (a `card-response` on a
+ * `review-summary` card), the line they rejected — so `nextTurn` asks about it
+ * again and doesn't immediately re-declare the interview done (PRD FR-5).
+ */
+function reopenedLineHint(conversation: ConversationState): string | null {
+  const last = conversation.turns.at(-1);
+  if (!last || last.role !== "user" || last.kind !== "card-response") return null;
+  const card = [...conversation.turns]
+    .reverse()
+    .find((t) => t.role === "assistant" && t.kind === "card" && t.id === last.cardId);
+  if (!card || card.kind !== "card" || card.card.type !== "review-summary") return null;
+  const response = last.response;
+  const lineKey =
+    response &&
+    typeof response === "object" &&
+    typeof (response as { lineKey?: unknown }).lineKey === "string"
+      ? (response as { lineKey: string }).lineKey
+      : "a figure";
+  return `The user has just reopened the review to correct: ${lineKey}. Ask them about that, and do not say the interview is done until it is resolved.`;
+}
+
 /** Build the per-turn prompt for {@link import("./next-turn").nextTurn}. */
 export function buildNextTurnPrompt(model: ReturnModel, conversation: ConversationState): string {
   const outstanding = topicsOutstanding(model);
   const unresolvedReconciliations = readExtractionScratch(model).pendingReconciliation;
+  const reopened = reopenedLineHint(conversation);
+  const rentalGateOutstanding =
+    model.rental.present && outstanding.some((t) => /rental scope gate/i.test(t));
   return [
+    ...(reopened ? ["JUST HAPPENED:", reopened, ""] : []),
     "WHAT THE RETURN MODEL ALREADY HOLDS:",
     renderModelForPrompt(model),
     "",

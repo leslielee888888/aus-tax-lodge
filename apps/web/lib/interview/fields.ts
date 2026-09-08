@@ -17,11 +17,14 @@
  */
 import {
   answer,
+  computedOrigin,
   confirm,
   confirmRepairsAreDeductible,
   markNotApplicable,
+  propose,
   reclassifyRepairsAsCapital,
   recomputeNetRentalResult,
+  type RentalScopeGateAnswer,
   type ReturnModel,
   type SpouseStatus,
 } from "@aus-tax-lodge/model";
@@ -98,6 +101,29 @@ const FIXED_PATH_KIND: Readonly<Record<string, FieldUpdateKind>> = {
   "rental.expenses.capitalWorks.amount": "number",
   "rental.expenses.declineInValue.amount": "number",
   "rental.repairsConfirmedNotCapital": "boolean",
+  // Rental scope gate (#83 / PRD FR-6, FR-24). Four booleans; a `false` on any
+  // is an out-of-scope hard stop (`detectOutOfScope`). Settled onto the
+  // `Provenanced<RentalScopeGateAnswer>` object + mirrored to the three
+  // `rental.*` scope booleans, exactly as v1 `lib/questions/form.ts` did.
+  "questionnaire.rentalScopeGate.solelyOwned": "boolean",
+  "questionnaire.rentalScopeGate.rentedOrAvailableAllYear": "boolean",
+  "questionnaire.rentalScopeGate.noPrivateUse": "boolean",
+  "questionnaire.rentalScopeGate.notBoughtOrSoldThisYear": "boolean",
+};
+
+/** The four rental-scope-gate sub-answers, and how each mirrors onto `rental.*`. */
+const RENTAL_SCOPE_GATE_RE =
+  /^questionnaire\.rentalScopeGate\.(solelyOwned|rentedOrAvailableAllYear|noPrivateUse|notBoughtOrSoldThisYear)$/;
+
+type RentalScopeGateKey = keyof RentalScopeGateAnswer;
+
+/** `rental.*` boolean each gate sub-answer keeps in step (the fourth has no rental mirror). */
+const GATE_RENTAL_MIRROR: Partial<
+  Record<RentalScopeGateKey, "soleOwnership" | "rentedOrAvailableAllYear" | "noPrivateUse">
+> = {
+  solelyOwned: "soleOwnership",
+  rentedOrAvailableAllYear: "rentedOrAvailableAllYear",
+  noPrivateUse: "noPrivateUse",
 };
 
 /** Rental expense lines the interview may set directly (owner-paid + manual depreciation). */
@@ -235,6 +261,10 @@ export function applyInterviewField(model: ReturnModel, update: FieldUpdate): Re
   }
   if (path === "rental.repairsConfirmedNotCapital") {
     return applyRepairsConfirmation(model, value as boolean | null);
+  }
+  const gateMatch = RENTAL_SCOPE_GATE_RE.exec(path);
+  if (gateMatch) {
+    return applyRentalScopeGate(model, gateMatch[1] as RentalScopeGateKey, value as boolean | null);
   }
 
   switch (path) {
@@ -513,4 +543,64 @@ function applyRepairsConfirmation(
     },
   };
   return { ...model, rental };
+}
+
+/**
+ * Apply one rental-scope-gate sub-answer (#83 / PRD FR-6, FR-24).
+ *
+ * The four booleans arrive as separate {@link FieldUpdate}s (the interview asks
+ * one multi-part question; Claude maps each part). Each call merges the new
+ * sub-answer into the partial gate object:
+ *
+ * - while any sub-answer is still unknown the object is `propose`d (so
+ *   `isSettled` stays false and the return isn't "ready" yet) but its `.value`
+ *   already carries every `false`, so `detectOutOfScope` fires the hard stop the
+ *   moment an out-of-scope answer lands;
+ * - once all four are known it is `answer`ed — the user's own fact.
+ *
+ * The three `rental.*` scope booleans the FR-13 export gate reads are kept in
+ * step from the same answers, exactly as v1 `applyQuestionsToModel` did.
+ */
+function applyRentalScopeGate(
+  model: ReturnModel,
+  key: RentalScopeGateKey,
+  value: boolean | null,
+): ReturnModel {
+  if (value == null) {
+    throw new InterviewFieldError(
+      `questionnaire.rentalScopeGate.${key} needs a yes/no answer`,
+      `questionnaire.rentalScopeGate.${key}`,
+    );
+  }
+
+  const field = model.questionnaire.rentalScopeGate;
+  const existing = field.value as Partial<RentalScopeGateAnswer> | null;
+  const partial: Partial<RentalScopeGateAnswer> = { ...(existing ?? {}), [key]: value };
+
+  const keys: RentalScopeGateKey[] = [
+    "solelyOwned",
+    "rentedOrAvailableAllYear",
+    "noPrivateUse",
+    "notBoughtOrSoldThisYear",
+  ];
+  const complete = keys.every((k) => typeof partial[k] === "boolean");
+  const gateField = complete
+    ? answer(field, partial as RentalScopeGateAnswer)
+    : propose(
+        field,
+        partial as RentalScopeGateAnswer,
+        computedOrigin("rental scope gate — answered in the interview"),
+      );
+
+  let rental = model.rental;
+  const mirror = GATE_RENTAL_MIRROR[key];
+  if (mirror) {
+    rental = { ...rental, [mirror]: answer(rental[mirror], value) };
+  }
+
+  return {
+    ...model,
+    rental,
+    questionnaire: { ...model.questionnaire, rentalScopeGate: gateField },
+  };
 }
