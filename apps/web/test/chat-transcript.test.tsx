@@ -52,7 +52,7 @@ describe("ChatTranscript (PRD FR-1, FR-12)", () => {
         role: "assistant",
         kind: "card",
         // A card type no task has built a body for yet — still the placeholder shell.
-        card: { type: "reconcile" },
+        card: { type: "review-summary" },
       }),
     ];
 
@@ -63,10 +63,10 @@ describe("ChatTranscript (PRD FR-1, FR-12)", () => {
     expect(text.indexOf("Hello from the assistant")).toBeLessThan(text.indexOf("Hi back"));
     expect(text.indexOf("Hi back")).toBeLessThan(text.indexOf("prefill-2025-26.pdf"));
     expect(text.indexOf("prefill-2025-26.pdf")).toBeLessThan(
-      text.indexOf("Two sources disagree — which is right?"),
+      text.indexOf("Review your whole return"),
     );
 
-    const card = container.querySelector('[data-card-type="reconcile"]');
+    const card = container.querySelector('[data-card-type="review-summary"]');
     expect(card).not.toBeNull();
     expect(card?.textContent).toMatch(/handled later in the interview/i);
   });

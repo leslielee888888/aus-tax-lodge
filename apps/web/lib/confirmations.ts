@@ -308,7 +308,9 @@ function sourceForField(field: Provenanced<unknown>): string {
   if (!origin) return "the return so far";
   if (origin.kind === "user-answer") return "what you told me";
   if (origin.kind === "computed") return "a figure worked out from your other answers";
-  // T6 adds mid-conversation documents; until then the only document is the
-  // pre-fill report, so this is accurate for v2's first build.
+  // A document origin. The pre-fill report is by far the common case; a
+  // mid-conversation document (T6) also lands here and reads the same — naming
+  // the exact file would need a docId→filename map this pure function is not
+  // given. `PendingConfirmation.source` is display-only, so this is acceptable.
   return "your pre-fill report";
 }

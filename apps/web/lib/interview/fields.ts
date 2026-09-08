@@ -17,7 +17,11 @@
  */
 import {
   answer,
+  confirm,
+  confirmRepairsAreDeductible,
   markNotApplicable,
+  reclassifyRepairsAsCapital,
+  recomputeNetRentalResult,
   type ReturnModel,
   type SpouseStatus,
 } from "@aus-tax-lodge/model";
@@ -83,7 +87,23 @@ const FIXED_PATH_KIND: Readonly<Record<string, FieldUpdateKind>> = {
   "privateHealth.rebateReceived": "number",
   "privateHealth.oldestCoveredPersonAge": "number",
   "privateHealth.coverDays": "number",
+  // Rental (FR-24) — the figures the assistant gathers by asking, because they
+  // are not on the agent statement: owner-paid expenses (Q24), hand-entered
+  // Div 43 / Div 40 totals when there is no QS schedule (Q23), and the
+  // repairs-vs-capital confirmation (Q25). The rental documents themselves go
+  // through `lib/rental-intake.ts`, never this list.
+  "rental.expenses.insurance.amount": "number",
+  "rental.expenses.landTax.amount": "number",
+  "rental.expenses.bodyCorporate.amount": "number",
+  "rental.expenses.capitalWorks.amount": "number",
+  "rental.expenses.declineInValue.amount": "number",
+  "rental.repairsConfirmedNotCapital": "boolean",
 };
+
+/** Rental expense lines the interview may set directly (owner-paid + manual depreciation). */
+const RENTAL_OWNER_PAID_KEYS = ["insurance", "landTax", "bodyCorporate"] as const;
+const RENTAL_MANUAL_DEPRECIATION_KEYS = ["capitalWorks", "declineInValue"] as const;
+const RENTAL_LINE_RE = /^rental\.expenses\.([a-zA-Z]+)\.amount$/;
 
 const INTEREST_ACCOUNT_RE =
   /^income\.interestAccounts\.([^.]+)\.(grossInterest|ownershipSharePercent)$/;
@@ -207,6 +227,15 @@ export function applyInterviewField(model: ReturnModel, update: FieldUpdate): Re
     );
   }
   const value = coerce(update, expected);
+
+  // --- Rental (FR-24) ----------------------------------------------------
+  const rentalLine = RENTAL_LINE_RE.exec(path);
+  if (rentalLine) {
+    return applyRentalExpenseLine(model, path, rentalLine[1]!, value as number | null);
+  }
+  if (path === "rental.repairsConfirmedNotCapital") {
+    return applyRepairsConfirmation(model, value as boolean | null);
+  }
 
   switch (path) {
     // --- Income scalars ---------------------------------------------------
@@ -412,4 +441,76 @@ function withSpouse(
   mutate: (s: ReturnModel["context"]["spouse"]) => ReturnModel["context"]["spouse"],
 ): ReturnModel {
   return { ...model, context: { ...model.context, spouse: mutate(model.context.spouse) } };
+}
+
+// ---------------------------------------------------------------------------
+// Rental (FR-24)
+// ---------------------------------------------------------------------------
+
+/**
+ * Set one owner-paid or hand-entered rental expense line (PRD FR-24, Q23/Q24)
+ * as the user's own fact, re-net the schedule, and mark the rental present —
+ * the user telling us a rental figure establishes that they have one. Only the
+ * three owner-paid keys and the two manual-depreciation keys are writable here;
+ * the agent statement / loan / QS figures land through `lib/rental-intake.ts`.
+ */
+function applyRentalExpenseLine(
+  model: ReturnModel,
+  path: string,
+  key: string,
+  value: number | null,
+): ReturnModel {
+  const ownerPaid = (RENTAL_OWNER_PAID_KEYS as readonly string[]).includes(key);
+  const manual = (RENTAL_MANUAL_DEPRECIATION_KEYS as readonly string[]).includes(key);
+  if (!ownerPaid && !manual) {
+    throw new InterviewFieldError(
+      `rental expense line "${key}" is not one the interview may set directly`,
+      path,
+    );
+  }
+  const expenseKey = key as keyof ReturnModel["rental"]["expenses"];
+  const line = model.rental.expenses[expenseKey];
+  const rental = recomputeNetRentalResult({
+    ...model.rental,
+    present: true,
+    expenses: {
+      ...model.rental.expenses,
+      [expenseKey]: { amount: answer(line.amount, value), source: "owner-paid" },
+    },
+  });
+  return { ...model, rental };
+}
+
+/**
+ * Apply the repairs-vs-capital answer (PRD Q25): `true` = a genuine repair
+ * (`confirmRepairsAreDeductible`), `false` = a capital improvement
+ * (`reclassifyRepairsAsCapital` moves the amount into capital works).
+ */
+function applyRepairsConfirmation(
+  model: ReturnModel,
+  isGenuineRepair: boolean | null,
+): ReturnModel {
+  if (isGenuineRepair == null) {
+    throw new InterviewFieldError(
+      "rental.repairsConfirmedNotCapital needs a yes/no answer",
+      "rental.repairsConfirmedNotCapital",
+    );
+  }
+  if (!isGenuineRepair) {
+    return { ...model, rental: reclassifyRepairsAsCapital(model.rental) };
+  }
+  // A genuine repair: record the confirmation AND settle the amount, so the
+  // user is not asked about the same line twice (mirrors v1 `confirmRepairs`).
+  const confirmed = confirmRepairsAreDeductible(model.rental);
+  const rental = {
+    ...confirmed,
+    expenses: {
+      ...confirmed.expenses,
+      repairsAndMaintenance: {
+        ...confirmed.expenses.repairsAndMaintenance,
+        amount: confirm(confirmed.expenses.repairsAndMaintenance.amount),
+      },
+    },
+  };
+  return { ...model, rental };
 }

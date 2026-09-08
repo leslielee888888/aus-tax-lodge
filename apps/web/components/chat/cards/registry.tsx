@@ -2,7 +2,9 @@ import type { CardRef } from "../../../lib/conversation";
 import { ConfirmFigureCard } from "./ConfirmFigureCard";
 import { IncomeCheckpointCard } from "./IncomeCheckpointCard";
 import { OutOfScopeCard } from "./OutOfScopeCard";
+import { ReconcileCard } from "./ReconcileCard";
 import type { CardComponent, CardComponentMap } from "./types";
+import { UploadOrTellCard } from "./UploadOrTellCard";
 import { UploadPrefillCard } from "./UploadPrefillCard";
 
 /**
@@ -14,6 +16,8 @@ export const CARD_COMPONENTS: CardComponentMap = {
   "upload-prefill": UploadPrefillCard,
   "income-checkpoint": IncomeCheckpointCard,
   "confirm-figure": ConfirmFigureCard,
+  "upload-or-tell": UploadOrTellCard,
+  reconcile: ReconcileCard,
   "out-of-scope": OutOfScopeCard,
 };
 

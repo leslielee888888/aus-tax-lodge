@@ -13,6 +13,8 @@ import { isReadyForEstimate, type ReturnModel } from "@aus-tax-lodge/model";
 import { validateReturn } from "@aus-tax-lodge/validation";
 
 import type { CardRef, ConversationState } from "../conversation";
+import { readExtractionScratch } from "../extraction-scratch";
+import { firstUnresolvedReconciliation } from "../reconciliation";
 import {
   buildNextTurnPrompt,
   NEXT_TURN_MAX_TOKENS,
@@ -48,6 +50,15 @@ export interface NextTurnInput {
 export async function nextTurn(input: NextTurnInput): Promise<InterviewStep> {
   const { model, conversation, client } = input;
 
+  // Deterministic short-circuit (PRD FR-7, following the `deterministicallyComplete`
+  // precedent): an unresolved source disagreement blocks progress on that figure
+  // exactly like a pending confirmation, and which source is right is the user's
+  // call — never Claude's and never a silent default. Raise the `reconcile` card
+  // before spending a Claude turn.
+  if (firstUnresolvedReconciliation(readExtractionScratch(model))) {
+    return { kind: "card", card: "reconcile" };
+  }
+
   const raw = await client.ask(buildNextTurnPrompt(model, conversation), {
     system: NEXT_TURN_SYSTEM,
     maxTokens: NEXT_TURN_MAX_TOKENS,
@@ -81,8 +92,11 @@ function parseStep(obj: Record<string, unknown>): InterviewStep {
       if (typeof card !== "string" || !(CARD_REFS as readonly string[]).includes(card)) {
         throw new Error(`interview: unknown card type ${JSON.stringify(card)}`);
       }
-      const text = typeof obj.text === "string" && obj.text.trim() !== "" ? obj.text.trim() : undefined;
-      return text ? { kind: "card", card: card as CardRef, text } : { kind: "card", card: card as CardRef };
+      const text =
+        typeof obj.text === "string" && obj.text.trim() !== "" ? obj.text.trim() : undefined;
+      return text
+        ? { kind: "card", card: card as CardRef, text }
+        : { kind: "card", card: card as CardRef };
     }
     case "done":
       return { kind: "done" };
