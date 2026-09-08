@@ -153,3 +153,20 @@ export function ClipboardCheckIcon(props: IconProps) {
     </Icon>
   );
 }
+
+export function UserIcon(props: IconProps) {
+  return (
+    <Icon strokeWidth={1.8} {...props}>
+      <circle cx="12" cy="8" r="4" />
+      <path d="M4 21c0-4 4-6 8-6s8 2 8 6" />
+    </Icon>
+  );
+}
+
+export function SendIcon(props: IconProps) {
+  return (
+    <Icon strokeWidth={2.2} {...props}>
+      <path d="M4 12l16-7-7 16-2-7z" />
+    </Icon>
+  );
+}
