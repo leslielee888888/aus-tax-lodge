@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { loadConversation, saveConversation, applyUserTurn, nextTurn } = vi.hoisted(() => ({
-  loadConversation: vi.fn(),
-  saveConversation: vi.fn(),
-  applyUserTurn: vi.fn(),
-  nextTurn: vi.fn(),
-}));
+const { loadConversation, saveConversation, applyUserTurn, nextTurn, maybeRunningEstimate } =
+  vi.hoisted(() => ({
+    loadConversation: vi.fn(),
+    saveConversation: vi.fn(),
+    applyUserTurn: vi.fn(),
+    nextTurn: vi.fn(),
+    maybeRunningEstimate: vi.fn(),
+  }));
 
 vi.mock("../lib/returns", () => ({
   loadConversation,
@@ -19,6 +21,13 @@ vi.mock("next/navigation", () => ({ redirect: vi.fn() }));
 vi.mock("../lib/ai/client", () => ({ getClaudeClient: () => ({ ask: vi.fn() }) }));
 
 vi.mock("../lib/interview", () => ({ applyUserTurn, nextTurn }));
+
+vi.mock("../lib/estimate/running-estimate", () => ({ maybeRunningEstimate }));
+
+vi.mock("../lib/review-summary", () => ({
+  reviewSummaryForModel: () => ({ incomplete: false, lines: [], headline: { kind: "refund" } }),
+  reopenQuestionFor: (lineKey: string) => `Let's fix ${lineKey}.`,
+}));
 
 import { sendMessage } from "../app/returns/[returnId]/actions";
 import { appendTurn, emptyConversation, type ConversationState } from "../lib/conversation";
@@ -45,13 +54,17 @@ beforeEach(() => {
   saveConversation.mockReset();
   applyUserTurn.mockReset();
   nextTurn.mockReset();
+  maybeRunningEstimate.mockReset();
   saveConversation.mockResolvedValue({ conflict: false, envelope: { revision: 4 } });
 });
 
 describe("sendMessage — the interview loop (PRD FR-3, FR-4)", () => {
   it("runs applyUserTurn, saves the updated model, and appends nextTurn's step", async () => {
     loadConversation.mockResolvedValue(loaded());
-    applyUserTurn.mockResolvedValue({ model: NEXT_MODEL, appliedPaths: ["deductions.workFromHome.hours"] });
+    applyUserTurn.mockResolvedValue({
+      model: NEXT_MODEL,
+      appliedPaths: ["deductions.workFromHome.hours"],
+    });
     nextTurn.mockResolvedValue({ kind: "ask", text: "Did you have any donations this year?" });
 
     const result = await sendMessage("ret1", 3, "  I worked from home  ");
@@ -59,9 +72,7 @@ describe("sendMessage — the interview loop (PRD FR-3, FR-4)", () => {
     expect(applyUserTurn).toHaveBeenCalledWith(
       expect.objectContaining({ model: MODEL, text: "I worked from home" }),
     );
-    expect(nextTurn).toHaveBeenCalledWith(
-      expect.objectContaining({ model: NEXT_MODEL }),
-    );
+    expect(nextTurn).toHaveBeenCalledWith(expect.objectContaining({ model: NEXT_MODEL }));
     expect(saveConversation).toHaveBeenCalledExactlyOnceWith(
       "ret1",
       expect.objectContaining({ expectedRevision: 3, model: NEXT_MODEL }),
@@ -81,7 +92,11 @@ describe("sendMessage — the interview loop (PRD FR-3, FR-4)", () => {
   it("maps a card step to an assistant card turn carrying the lead text", async () => {
     loadConversation.mockResolvedValue(loaded());
     applyUserTurn.mockResolvedValue({ model: NEXT_MODEL, appliedPaths: [] });
-    nextTurn.mockResolvedValue({ kind: "card", card: "confirm-figure", text: "One figure to check." });
+    nextTurn.mockResolvedValue({
+      kind: "card",
+      card: "confirm-figure",
+      text: "One figure to check.",
+    });
 
     await sendMessage("ret1", 3, "here you go");
 
@@ -130,8 +145,9 @@ describe("sendMessage — the interview loop (PRD FR-3, FR-4)", () => {
       kind: "card",
       card: { type: "out-of-scope" },
     });
-    expect((saved.turns[1] as { card: { payload: { findings: unknown[] } } }).card.payload.findings)
-      .toHaveLength(1);
+    expect(
+      (saved.turns[1] as { card: { payload: { findings: unknown[] } } }).card.payload.findings,
+    ).toHaveLength(1);
     expect(result.revision).toBe(4);
   });
 
@@ -174,6 +190,61 @@ describe("sendMessage — the interview loop (PRD FR-3, FR-4)", () => {
   });
 });
 
+describe("sendMessage — running estimate + review corrections (PRD FR-10, FR-11)", () => {
+  it("answers a running-estimate question from the engine and skips the field loop", async () => {
+    loadConversation.mockResolvedValue(loaded());
+    maybeRunningEstimate.mockReturnValue(
+      "Right now the numbers point to a refund of about $2,000.",
+    );
+
+    await sendMessage("ret1", 3, "how's my refund looking so far?");
+
+    expect(applyUserTurn).not.toHaveBeenCalled();
+    expect(nextTurn).not.toHaveBeenCalled();
+    const turns = savedConversation().turns;
+    expect(turns[1]).toMatchObject({
+      role: "assistant",
+      kind: "message",
+      text: "Right now the numbers point to a refund of about $2,000.",
+    });
+  });
+
+  it("in review, a clear correction re-issues a fresh review-summary card", async () => {
+    loadConversation.mockResolvedValue(
+      loaded({ conversation: { ...emptyConversation(), phase: "review" } }),
+    );
+    maybeRunningEstimate.mockReturnValue(null);
+    applyUserTurn.mockResolvedValue({
+      model: NEXT_MODEL,
+      appliedPaths: ["income.salaryWages[0].grossSalaryWages"],
+    });
+
+    await sendMessage("ret1", 3, "my salary should be 82,000");
+
+    const saved = savedConversation();
+    expect(saved.phase).toBe("review");
+    expect(saved.turns.at(-1)).toMatchObject({ kind: "card", card: { type: "review-summary" } });
+    expect(saveConversation).toHaveBeenCalledWith(
+      "ret1",
+      expect.objectContaining({ model: NEXT_MODEL }),
+    );
+  });
+
+  it("in review, random chatter gets the canned 'use the summary' reply", async () => {
+    loadConversation.mockResolvedValue(
+      loaded({ conversation: { ...emptyConversation(), phase: "review" } }),
+    );
+    maybeRunningEstimate.mockReturnValue(null);
+    applyUserTurn.mockResolvedValue({ model: MODEL, appliedPaths: [] });
+
+    await sendMessage("ret1", 3, "thanks, looks good");
+
+    const saved = savedConversation();
+    expect(saved.phase).toBe("review");
+    expect((saved.turns.at(-1) as { text: string }).text).toMatch(/summary above/i);
+  });
+});
+
 describe("sendMessage — outside the interview (PRD FR-1)", () => {
   it("nudges the user to the drop zone when they type in the upload phase", async () => {
     loadConversation.mockResolvedValue(
@@ -211,7 +282,9 @@ describe("sendMessage — guards (PRD FR-12)", () => {
     });
     loadConversation
       .mockResolvedValueOnce(loaded({ envelope: { revision: 5, targetYear: "2025-26" } }))
-      .mockResolvedValueOnce(loaded({ conversation: fresh, envelope: { revision: 6, targetYear: "2025-26" } }));
+      .mockResolvedValueOnce(
+        loaded({ conversation: fresh, envelope: { revision: 6, targetYear: "2025-26" } }),
+      );
     applyUserTurn.mockResolvedValue({ model: NEXT_MODEL, appliedPaths: [] });
     nextTurn.mockResolvedValue({ kind: "say", text: "ok" });
     saveConversation.mockResolvedValue({ conflict: true, current: { revision: 6 } });

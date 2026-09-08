@@ -48,7 +48,8 @@ export const NEXT_TURN_SYSTEM = [
   "    needed in the lead text. Never list documents the user 'should' provide.",
   '  "reconcile" — two sources disagree on a figure; the app raises this itself, do not pick it.',
   '  "confirm-figure" — check one specific flagged figure.',
-  '  "review-summary" — the interview is done.',
+  'When every topic is genuinely covered, return {"kind":"done"} — do NOT try to',
+  "produce a review or summary card yourself; the app builds the whole-return review.",
 ].join("\n");
 
 /**
@@ -103,6 +104,18 @@ export function buildNextTurnPrompt(model: ReturnModel, conversation: Conversati
     "lead as what specifically is needed: a deduction dollar amount the user has raised, or the",
     "rental figures once the user has said they have a rental property.",
     "",
+    ...(rentalGateOutstanding
+      ? [
+          "RENTAL SCOPE GATE OUTSTANDING — the return has a rental property but its scope-gate",
+          "questions are not all answered yet. Ask, in plain English, one question covering: whether",
+          "they own the property on their own (not co-owned), whether it was rented or genuinely",
+          "available for rent the whole year, whether there was any private use, and whether they",
+          "bought or sold it during the year. A 'no' to sole ownership / all-year / no-private-use,",
+          "or a 'yes' to bought-or-sold, is decided by the app as an out-of-scope stop — do not",
+          "declare that yourself, just gather the answers.",
+          "",
+        ]
+      : []),
     "Decide the single next thing to say. Return the JSON object.",
   ].join("\n");
 }
