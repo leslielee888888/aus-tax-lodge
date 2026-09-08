@@ -190,6 +190,67 @@ describe("sendMessage — the interview loop (PRD FR-3, FR-4)", () => {
   });
 });
 
+describe("sendMessage — failure handling (FR-14)", () => {
+  const rateLimit = () => Object.assign(new Error("429 Too Many Requests"), { status: 429 });
+
+  it("on a 429 from applyUserTurn: records the exchange, keeps the model + phase, flags a resumable pause", async () => {
+    loadConversation.mockResolvedValue(loaded());
+    applyUserTurn.mockRejectedValue(rateLimit());
+
+    const result = await sendMessage("ret1", 3, "here is my answer");
+
+    expect(nextTurn).not.toHaveBeenCalled();
+    // Confirmed state untouched — the loaded model is persisted unchanged.
+    expect(saveConversation).toHaveBeenCalledExactlyOnceWith(
+      "ret1",
+      expect.objectContaining({ model: MODEL }),
+    );
+    const saved = savedConversation();
+    expect(saved.phase).toBe("interview");
+    expect(saved.turns.map((t) => `${t.role}:${t.kind}`)).toEqual([
+      "user:message",
+      "assistant:message",
+    ]);
+    expect((saved.turns[1] as { text: string }).text).toMatch(/usage limit/i);
+    // A resumable pause, distinct from a hard error.
+    expect(result.rateLimited).toBe(true);
+    expect(result.error).toMatch(/paused/i);
+  });
+
+  it("on a generic error from applyUserTurn: plain message, no pause flag", async () => {
+    loadConversation.mockResolvedValue(loaded());
+    applyUserTurn.mockRejectedValue(new Error("socket hang up"));
+
+    const result = await sendMessage("ret1", 3, "here is my answer");
+
+    const saved = savedConversation();
+    expect(saveConversation).toHaveBeenCalledExactlyOnceWith(
+      "ret1",
+      expect.objectContaining({ model: MODEL }),
+    );
+    expect((saved.turns[1] as { text: string }).text).toMatch(/progress is saved/i);
+    expect(result.rateLimited).toBeUndefined();
+  });
+
+  it("on a 429 from nextTurn: keeps applyUserTurn's applied model, flags the pause", async () => {
+    loadConversation.mockResolvedValue(loaded());
+    applyUserTurn.mockResolvedValue({ model: NEXT_MODEL, appliedPaths: ["deductions.donations"] });
+    nextTurn.mockRejectedValue(rateLimit());
+
+    const result = await sendMessage("ret1", 3, "I gave $200 to charity");
+
+    // applyUserTurn's writes stand; only 'pick the next question' failed.
+    expect(saveConversation).toHaveBeenCalledExactlyOnceWith(
+      "ret1",
+      expect.objectContaining({ model: NEXT_MODEL }),
+    );
+    const saved = savedConversation();
+    expect(saved.phase).toBe("interview");
+    expect((saved.turns.at(-1) as { text: string }).text).toMatch(/usage limit/i);
+    expect(result.rateLimited).toBe(true);
+  });
+});
+
 describe("sendMessage — running estimate + review corrections (PRD FR-10, FR-11)", () => {
   it("answers a running-estimate question from the engine and skips the field loop", async () => {
     loadConversation.mockResolvedValue(loaded());

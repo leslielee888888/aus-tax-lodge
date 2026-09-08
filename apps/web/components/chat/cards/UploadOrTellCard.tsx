@@ -31,6 +31,8 @@ interface RouteResponse {
   readonly conversation?: ConversationState;
   readonly revision?: number;
   readonly error?: string;
+  /** FR-14 — the upload hit Claude's rate limit: a resumable pause, not a failure. */
+  readonly rateLimited?: boolean;
 }
 
 function readLead(payload: unknown): string | null {
@@ -43,6 +45,8 @@ export function UploadOrTellCard({ returnId, revision, turn, readOnly, onResult 
   const [phase, setPhase] = useState<Phase>("idle");
   const [dragActive, setDragActive] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  /** FR-14 — a rate-limit pause note, shown calm (not as a hard error). */
+  const [pausedNote, setPausedNote] = useState<string | null>(null);
 
   const lead = readLead(turn.card.payload);
   const busy = phase === "uploading" || phase === "reading" || phase === "telling";
@@ -51,6 +55,7 @@ export function UploadOrTellCard({ returnId, revision, turn, readOnly, onResult 
 
   async function submitFile(file: File) {
     setMessage(null);
+    setPausedNote(null);
     setPhase("uploading");
 
     const body = new FormData();
@@ -85,6 +90,14 @@ export function UploadOrTellCard({ returnId, revision, turn, readOnly, onResult 
 
     if (payload.ok) {
       setPhase("accepted");
+      return;
+    }
+    if (payload.rateLimited) {
+      // FR-14 — a resumable pause; keep the drop zone usable.
+      setPhase("idle");
+      setPausedNote(
+        "Paused — Claude's usage limit. Your progress is saved. Try again in a little while, or tell me the figure directly.",
+      );
       return;
     }
     if (payload.reason === "out-of-scope") {
@@ -195,6 +208,15 @@ export function UploadOrTellCard({ returnId, revision, turn, readOnly, onResult 
         {message ? (
           <p role="alert" className="mt-3 text-[12.5px] font-medium text-danger">
             {message}
+          </p>
+        ) : null}
+
+        {pausedNote ? (
+          <p
+            role="status"
+            className="mt-3 rounded-lg border border-warn bg-warn-soft px-3 py-2 text-[12.5px] font-medium text-warn"
+          >
+            {pausedNote}
           </p>
         ) : null}
 

@@ -27,8 +27,12 @@ const {
 }));
 
 vi.mock("../lib/documents", () => ({ ingestUploads }));
-vi.mock("../lib/ai/client", () => ({ getClaudeClient: () => ({ askVision: vi.fn(), ask: vi.fn() }) }));
-vi.mock("../lib/store", () => ({ getDocumentStore: () => ({ getDocument: vi.fn(), putDocument: vi.fn() }) }));
+vi.mock("../lib/ai/client", () => ({
+  getClaudeClient: () => ({ askVision: vi.fn(), ask: vi.fn() }),
+}));
+vi.mock("../lib/store", () => ({
+  getDocumentStore: () => ({ getDocument: vi.fn(), putDocument: vi.fn() }),
+}));
 vi.mock("../lib/returns", () => ({
   loadConversation,
   saveConversation,
@@ -46,7 +50,13 @@ const EMPTY_MODEL = createEmptyReturnModel("2025-26");
 
 function modelWithSalary(): ReturnModel {
   const base = createEmptyReturnModel("2025-26");
-  const origin = { kind: "document", docId: "d1", page: 1, snippet: "x", confidence: "high" } as const;
+  const origin = {
+    kind: "document",
+    docId: "d1",
+    page: 1,
+    snippet: "x",
+    confidence: "high",
+  } as const;
   return {
     ...base,
     income: {
@@ -118,9 +128,7 @@ describe("POST /api/returns/:id/prefill (PRD FR-1, FR-2)", () => {
     ingestUploads.mockResolvedValue({
       status: 201,
       body: {
-        documents: [
-          { docId: "doc9", filename: "divs.pdf", detectedType: "dividend-statement" },
-        ],
+        documents: [{ docId: "doc9", filename: "divs.pdf", detectedType: "dividend-statement" }],
       },
     });
 
@@ -143,7 +151,15 @@ describe("POST /api/returns/:id/prefill (PRD FR-1, FR-2)", () => {
     extractDocument.mockResolvedValue({
       docId: "doc1",
       documentType: "ato-prefill-report",
-      figures: [{ modelPath: "income.salaryWages[0].grossSalaryWages", value: 95000, page: 1, snippet: "x", confidence: "high" }],
+      figures: [
+        {
+          modelPath: "income.salaryWages[0].grossSalaryWages",
+          value: 95000,
+          page: 1,
+          snippet: "x",
+          confidence: "high",
+        },
+      ],
     });
     applyExtractions.mockReturnValue({ model: modelWithSalary(), pendingReconciliation: [] });
     nextTurn.mockResolvedValue({ kind: "ask", text: "Did you work from home this year?" });
@@ -161,7 +177,7 @@ describe("POST /api/returns/:id/prefill (PRD FR-1, FR-2)", () => {
     const kinds = saved.turns.map((t) => `${t.role}:${t.kind}`);
     expect(kinds).toEqual(["user:file", "assistant:message", "assistant:message"]);
 
-    expect((saved.turns[0] as { filename: string; docId: string })).toMatchObject({
+    expect(saved.turns[0] as { filename: string; docId: string }).toMatchObject({
       filename: "prefill.pdf",
       docId: "doc1",
     });
@@ -170,7 +186,9 @@ describe("POST /api/returns/:id/prefill (PRD FR-1, FR-2)", () => {
 
     // Extraction bookkeeping rides along on the saved model.
     const savedModel = saveConversation.mock.calls[0]![1].model as Record<string, unknown>;
-    expect(savedModel.__t16Extraction).toMatchObject({ extracted: [{ docId: "doc1", figuresCount: 1 }] });
+    expect(savedModel.__t16Extraction).toMatchObject({
+      extracted: [{ docId: "doc1", figuresCount: 1 }],
+    });
   });
 
   it("hard-stops when the seeded model is out of scope — no interview, loaded model kept", async () => {
@@ -235,6 +253,50 @@ describe("POST /api/returns/:id/prefill (PRD FR-1, FR-2)", () => {
     expect(saved.phase).toBe("upload");
     expect((saved.turns.at(-1) as { text: string }).text).toMatch(/couldn't read that file/i);
     // The confirmed model is untouched.
+    expect(saveConversation.mock.calls[0]![1].model).toBe(EMPTY_MODEL);
+  });
+
+  it("flags a 429 during extraction as a resumable pause (FR-14)", async () => {
+    extractDocument.mockRejectedValue(
+      Object.assign(new Error("429 Too Many Requests"), { status: 429 }),
+    );
+
+    const res = await POST(request(), ctx);
+    const body = await res.json();
+
+    expect(body.ok).toBe(false);
+    expect(body.reason).toBe("unreadable");
+    expect(body.rateLimited).toBe(true);
+    expect(nextTurn).not.toHaveBeenCalled();
+
+    const saved = savedConversation();
+    expect(saved.phase).toBe("upload");
+    expect((saved.turns.at(-1) as { text: string }).text).toMatch(/usage limit/i);
+    expect(saveConversation.mock.calls[0]![1].model).toBe(EMPTY_MODEL);
+  });
+
+  it("does not open the interview when the scope check can't complete (FR-14)", async () => {
+    extractDocument.mockResolvedValue({
+      docId: "doc1",
+      documentType: "ato-prefill-report",
+      figures: [],
+    });
+    applyExtractions.mockReturnValue({ model: modelWithSalary(), pendingReconciliation: [] });
+    checkModelInScope.mockRejectedValue(new Error("scope vision timeout"));
+
+    const res = await POST(request(), ctx);
+    const body = await res.json();
+
+    expect(body.ok).toBe(false);
+    expect(body.reason).toBe("scope-check-failed");
+    expect(body.rateLimited).toBe(false);
+    // The interview never opens — the assistant must not assume in-scope.
+    expect(nextTurn).not.toHaveBeenCalled();
+
+    const saved = savedConversation();
+    expect(saved.phase).toBe("upload");
+    expect((saved.turns.at(-1) as { text: string }).text).toMatch(/couldn't finish checking/i);
+    // FR-9/FR-14 — the seeded (unchecked) model is NOT persisted.
     expect(saveConversation.mock.calls[0]![1].model).toBe(EMPTY_MODEL);
   });
 

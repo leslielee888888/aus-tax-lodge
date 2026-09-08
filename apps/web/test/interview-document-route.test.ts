@@ -319,3 +319,59 @@ describe("POST interview-document — out of scope (PRD FR-9)", () => {
     expect(saveConversation.mock.calls[0]![1].model).toBe(EMPTY);
   });
 });
+
+describe("POST interview-document — failure handling (FR-14)", () => {
+  function extractableDoc() {
+    ingestAs("wfh-or-expense-record");
+    extractDocument.mockResolvedValue({
+      docId: "new1",
+      documentType: "wfh-or-expense-record",
+      figures: [
+        {
+          modelPath: "deductions.workRelatedTravel.amount",
+          value: 500,
+          page: 1,
+          snippet: "$500",
+          confidence: "high",
+        },
+      ],
+    });
+  }
+
+  it("a 429 reading the document is a resumable pause — model + phase untouched", async () => {
+    ingestAs("wfh-or-expense-record");
+    extractDocument.mockRejectedValue(Object.assign(new Error("429"), { status: 429 }));
+
+    const res = await POST(request(), ctx);
+    const body = await res.json();
+
+    expect(body.ok).toBe(false);
+    expect(body.reason).toBe("unreadable");
+    expect(body.rateLimited).toBe(true);
+    expect(nextTurn).not.toHaveBeenCalled();
+
+    const saved = savedConversation();
+    expect(saved.phase).toBe("interview");
+    expect((saved.turns.at(-1) as { text: string }).text).toMatch(/usage limit/i);
+    expect(saveConversation.mock.calls[0]![1].model).toBe(EMPTY);
+  });
+
+  it("an incomplete scope check does not let the document's figures through as in-scope", async () => {
+    extractableDoc();
+    checkModelInScope.mockRejectedValue(new Error("scope vision timeout"));
+
+    const res = await POST(request(), ctx);
+    const body = await res.json();
+
+    expect(body.ok).toBe(false);
+    expect(body.reason).toBe("scope-check-failed");
+    expect(body.rateLimited).toBe(false);
+    expect(nextTurn).not.toHaveBeenCalled();
+
+    const saved = savedConversation();
+    expect(saved.phase).toBe("interview");
+    expect((saved.turns.at(-1) as { text: string }).text).toMatch(/couldn't finish checking/i);
+    // The pre-document model is persisted — no figure leakage.
+    expect(saveConversation.mock.calls[0]![1].model).toBe(EMPTY);
+  });
+});

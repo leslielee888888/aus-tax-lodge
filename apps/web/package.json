@@ -19,6 +19,7 @@
     "@aus-tax-lodge/model": "*",
     "@aus-tax-lodge/store": "*",
     "@aus-tax-lodge/validation": "*",
+    "@anthropic-ai/sdk": "^0.65.0",
     "archiver": "^7.0.1",
     "archiver-zip-encrypted": "^2.0.0",
     "next": "^15.5.0",

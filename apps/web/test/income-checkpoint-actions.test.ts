@@ -177,4 +177,34 @@ describe("resolveConfirmation (PRD FR-5, between the checkpoints)", () => {
     expect(saveConversation).not.toHaveBeenCalled();
     expect(result.error).toMatch(/number/i);
   });
+
+  describe("failure handling in a card action (FR-14)", () => {
+    const rateLimit = () => Object.assign(new Error("429"), { status: 429 });
+
+    it("a 429 while advancing the interview: the card's write stands, phase held, pause flagged", async () => {
+      loadConversation.mockResolvedValue(loadedWithConfirmation());
+      nextTurn.mockRejectedValue(rateLimit());
+
+      const result = await resolveConfirmation("r1", 3, "card1", confirmation.id, { accept: true });
+
+      // The confirmation was still applied + recorded — only 'next question' failed.
+      expect(savedModel().income.interestAccounts[0]!.grossInterest.status).toBe("confirmed");
+      const saved = savedConversation();
+      expect(saved.phase).toBe("interview");
+      expect((saved.turns.at(-1) as { text: string }).text).toMatch(/usage limit/i);
+      expect(result.rateLimited).toBe(true);
+    });
+
+    it("a generic error while advancing: plain message, no pause flag", async () => {
+      loadConversation.mockResolvedValue(loadedWithConfirmation());
+      nextTurn.mockRejectedValue(new Error("upstream 503"));
+
+      const result = await resolveConfirmation("r1", 3, "card1", confirmation.id, { accept: true });
+
+      expect((savedConversation().turns.at(-1) as { text: string }).text).toMatch(
+        /progress is saved/i,
+      );
+      expect(result.rateLimited).toBeUndefined();
+    });
+  });
 });

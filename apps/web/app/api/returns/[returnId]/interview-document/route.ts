@@ -9,6 +9,7 @@ import type { RentalSchedule, ReturnModel } from "@aus-tax-lodge/model";
 import type { DocumentType } from "@aus-tax-lodge/store";
 
 import { getClaudeClient } from "../../../../../lib/ai/client";
+import { classifyConversationFailure } from "../../../../../lib/ai/failure";
 import { recomputePendingConfirmations } from "../../../../../lib/confirmations";
 import { appendTurn, type ConversationState } from "../../../../../lib/conversation";
 import { ingestUploads } from "../../../../../lib/documents";
@@ -79,6 +80,11 @@ type IngestedDoc = { docId: string; detectedType: string; filename: string; extr
  * raises `confirm-figure`), fresh mismatches land in the `__t16Extraction`
  * scratch (so `nextTurn` raises `reconcile`), and the assistant's next move is
  * folded into the transcript. Every response carries `{ conversation, revision }`.
+ *
+ * FR-14 — if reading the document, the scope check, or `nextTurn` fails, the
+ * pre-document model is persisted **unchanged**, `phase` stays `interview`, and
+ * a plain assistant message is appended (`{ ok:false, reason:"unreadable" |
+ * "scope-check-failed", rateLimited }`); a 429 is a resumable pause.
  */
 export async function POST(request: Request, { params }: RouteContext): Promise<Response> {
   const { returnId } = await params;
@@ -148,12 +154,37 @@ export async function POST(request: Request, { params }: RouteContext): Promise<
         : notHelpful(model);
 
     // Out-of-scope gate over the resulting model (PRD FR-8, FR-9, FR-20).
-    const { findings, model: checkedModel } = await checkModelInScope({
-      returnId,
-      model: folded.model,
-      store,
-      visionClient: client,
-    });
+    //
+    // FR-14 — if the scope check can't complete, the interview does NOT carry
+    // on with the document's figures as if they were in scope: persist the
+    // **pre-document** model, stay in `interview`, and say so plainly.
+    let scoped: Awaited<ReturnType<typeof checkModelInScope>>;
+    try {
+      scoped = await checkModelInScope({
+        returnId,
+        model: folded.model,
+        store,
+        visionClient: client,
+      });
+    } catch (err) {
+      const failure = classifyConversationFailure(err, { step: "scope-check" });
+      const said = appendTurn(withFile, {
+        role: "assistant",
+        kind: "message",
+        text: failure.assistantMessage,
+      });
+      const result = await save(said, model);
+      return json(
+        {
+          ...result,
+          ok: false,
+          reason: "scope-check-failed" as const,
+          rateLimited: failure.resumablePause,
+        },
+        200,
+      );
+    }
+    const { findings, model: checkedModel } = scoped;
 
     if (findings.length > 0) {
       let stopped = appendTurn(withFile, {
@@ -191,14 +222,26 @@ export async function POST(request: Request, { params }: RouteContext): Promise<
 
     const result = await save(next, nextModel);
     return json({ ...result, ok: true, reason: folded.reason }, 200);
-  } catch {
+  } catch (err) {
+    // FR-14 — reading the document / reaching Claude failed. Persist the
+    // pre-document model unchanged, stay in `interview`, and say so plainly. A
+    // 429 is flagged a resumable pause.
+    const failure = classifyConversationFailure(err, { step: "extraction" });
     const said = appendTurn(withFile, {
       role: "assistant",
       kind: "message",
-      text: "I couldn't read that file just now — try uploading it again, or tell me the figures directly.",
+      text: failure.assistantMessage,
     });
-    const result = await save(said);
-    return json({ ...result, ok: false, reason: "unreadable" as const }, 200);
+    const result = await save(said, model);
+    return json(
+      {
+        ...result,
+        ok: false,
+        reason: "unreadable" as const,
+        rateLimited: failure.resumablePause,
+      },
+      200,
+    );
   }
 }
 
