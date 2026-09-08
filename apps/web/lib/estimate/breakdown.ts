@@ -17,7 +17,7 @@
 import { getParams, type FullAssessment } from "@aus-tax-lodge/engine";
 import { RENTAL_EXPENSE_KEYS, type ReturnModel } from "@aus-tax-lodge/model";
 
-import { formatMoney } from "../review/format";
+import { formatMoney } from "../review-format";
 
 // ---------------------------------------------------------------------------
 // Row / headline types
