@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from "vitest";
 import { deterministicallyComplete, nextTurn } from "../../lib/interview";
 import type { InterviewClient } from "../../lib/interview";
 import { appendTurn, emptyConversation, type ConversationState } from "../../lib/conversation";
+import { withExtractionScratch } from "../../lib/extraction-scratch";
 import { confirmedField, readyModel } from "../review-fixtures";
 
 function mockClient(reply: string): { client: InterviewClient; ask: ReturnType<typeof vi.fn> } {
@@ -149,5 +150,40 @@ describe("nextTurn (PRD FR-3)", () => {
     await expect(
       nextTurn({ model: seededIncomeOnly(), conversation: CONVO, client }),
     ).rejects.toThrow(/unknown card type/i);
+  });
+
+  it("short-circuits to a reconcile card when a source disagreement is unresolved (PRD FR-7)", async () => {
+    const model = withExtractionScratch(seededIncomeOnly(), {
+      extracted: [],
+      pendingReconciliation: [
+        {
+          modelPath: "income.interestAccounts[0].grossInterest",
+          candidates: [
+            {
+              docId: "d1",
+              documentType: "ato-prefill-report",
+              page: 1,
+              snippet: "1,240",
+              confidence: "high",
+              value: 1240,
+            },
+            {
+              docId: "d2",
+              documentType: "bank-interest-notice",
+              page: 1,
+              snippet: "1,310",
+              confidence: "medium",
+              value: 1310,
+            },
+          ],
+        },
+      ],
+    });
+    const { client, ask } = mockClient(JSON.stringify({ kind: "ask", text: "unused" }));
+
+    const step = await nextTurn({ model, conversation: CONVO, client });
+
+    expect(step).toEqual({ kind: "card", card: "reconcile" });
+    expect(ask).not.toHaveBeenCalled();
   });
 });

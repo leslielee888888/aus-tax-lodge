@@ -4,6 +4,8 @@ import { redirect } from "next/navigation";
 
 import type { ReturnModel } from "@aus-tax-lodge/model";
 
+import { resolveReconciliation } from "@aus-tax-lodge/extraction";
+
 import { getClaudeClient } from "../../../lib/ai/client";
 import {
   confirmFieldAtPath,
@@ -11,6 +13,11 @@ import {
   firstUnresolvedConfirmation,
   recomputePendingConfirmations,
 } from "../../../lib/confirmations";
+import {
+  mergePendingReconciliation,
+  readExtractionScratch,
+  withExtractionScratch,
+} from "../../../lib/extraction-scratch";
 import {
   appendTurn,
   emptyConversation,
@@ -491,6 +498,106 @@ export async function resolveConfirmation(
     }),
     pendingConfirmations: resolved,
   };
+  return advanceInterview(returnId, expectedRevision, loaded, base, model);
+}
+
+// ---------------------------------------------------------------------------
+// Mid-conversation documents (PRD FR-6, FR-7) — the `upload-or-tell` +
+// `reconcile` cards T6 owns. The document upload itself is the
+// `/api/returns/:id/interview-document` route; these handle the card buttons.
+// ---------------------------------------------------------------------------
+
+/**
+ * "I'll just tell you" on an `upload-or-tell` card (PRD FR-6): the user would
+ * rather type the figure than drop a document. Record the choice and hand the
+ * turn back to the composer with a short nudge — `applyUserTurn` maps whatever
+ * they type onto the right field via the allow-list. The interview is **not**
+ * advanced here (that would re-ask); the user's next message drives it.
+ */
+export async function tellFigureInstead(
+  returnId: string,
+  expectedRevision: number,
+  cardId: string,
+): Promise<SendMessageResult> {
+  const gate = await loadForCard(returnId);
+  if ("error" in gate) return gate.error;
+  const { loaded } = gate;
+
+  const base = appendTurn(loaded.conversation, {
+    role: "user",
+    kind: "card-response",
+    cardId,
+    response: { tell: true },
+  });
+  const next = appendTurn(base, {
+    role: "assistant",
+    kind: "message",
+    text: "No problem — type the figure here and I'll use that.",
+  });
+  return persistCardTurn(returnId, expectedRevision, loaded, next, loaded.model);
+}
+
+/**
+ * A pick on a `reconcile` card (PRD FR-7): the user has chosen which source is
+ * right for a figure two documents disagreed on. `resolveReconciliation`
+ * applies the chosen candidate's value via `propose()` against its own
+ * document origin (still confirmed later like any figure); the entry is removed
+ * from the `__t16Extraction` scratch and the interview carries on.
+ */
+export async function resolveReconcile(
+  returnId: string,
+  expectedRevision: number,
+  cardId: string,
+  modelPath: string,
+  chosenIndex: number,
+): Promise<SendMessageResult> {
+  const gate = await loadForCard(returnId);
+  if ("error" in gate) return gate.error;
+  const { loaded } = gate;
+
+  if (!Number.isInteger(chosenIndex) || chosenIndex < 0) {
+    return {
+      conversation: loaded.conversation,
+      revision: loaded.envelope.revision,
+      error: "Pick one of the values to continue.",
+    };
+  }
+
+  const scratch = readExtractionScratch(loaded.model);
+  const target = scratch.pendingReconciliation.find((p) => p.modelPath === modelPath);
+  if (!target || target.candidates[chosenIndex] === undefined) {
+    return {
+      conversation: loaded.conversation,
+      revision: loaded.envelope.revision,
+      error: "That disagreement isn't waiting to be resolved any more.",
+    };
+  }
+
+  let model: ReturnModel;
+  try {
+    const { model: resolvedModel, unresolved } = resolveReconciliation(
+      loaded.model,
+      scratch.pendingReconciliation,
+      [{ modelPath, chosenIndex }],
+    );
+    model = withExtractionScratch(resolvedModel, {
+      ...scratch,
+      pendingReconciliation: mergePendingReconciliation([], unresolved),
+    });
+  } catch {
+    return {
+      conversation: loaded.conversation,
+      revision: loaded.envelope.revision,
+      error: "I couldn't apply that just now — try again.",
+    };
+  }
+
+  const base = appendTurn(loaded.conversation, {
+    role: "user",
+    kind: "card-response",
+    cardId,
+    response: { modelPath, chosenIndex },
+  });
   return advanceInterview(returnId, expectedRevision, loaded, base, model);
 }
 

@@ -11,6 +11,7 @@ import type { ReturnModel } from "@aus-tax-lodge/model";
 import { SCOPE_CODES, type ScopeCode } from "@aus-tax-lodge/scope";
 
 import type { ConversationState } from "../conversation";
+import { readExtractionScratch } from "../extraction-scratch";
 import { INTERVIEW_FIELD_PATHS } from "./fields";
 import { renderModelForPrompt, renderTranscript } from "./render";
 import { INTERVIEW_TOPIC_AREAS, topicsOutstanding } from "./topics";
@@ -40,13 +41,20 @@ export const NEXT_TURN_SYSTEM = [
   '  {"kind":"say","text":"<a short statement or acknowledgement, no question>"}',
   '  {"kind":"card","card":"<card-type>","text":"<optional lead-in>"}',
   '  {"kind":"done"}',
-  'Valid card types: "income-checkpoint", "upload-or-tell", "reconcile", "confirm-figure",',
-  '  "review-summary".',
+  "Valid card types:",
+  '  "income-checkpoint" — check the income the pre-fill report seeded, line by line.',
+  '  "upload-or-tell" — a topic the pre-fill does not carry (a deduction amount, the rental',
+  "    inputs): offer the user one document to drop OR to state the figure(s). Put what is",
+  "    needed in the lead text. Never list documents the user 'should' provide.",
+  '  "reconcile" — two sources disagree on a figure; the app raises this itself, do not pick it.',
+  '  "confirm-figure" — check one specific flagged figure.',
+  '  "review-summary" — the interview is done.',
 ].join("\n");
 
 /** Build the per-turn prompt for {@link import("./next-turn").nextTurn}. */
 export function buildNextTurnPrompt(model: ReturnModel, conversation: ConversationState): string {
   const outstanding = topicsOutstanding(model);
+  const unresolvedReconciliations = readExtractionScratch(model).pendingReconciliation;
   return [
     "WHAT THE RETURN MODEL ALREADY HOLDS:",
     renderModelForPrompt(model),
@@ -59,6 +67,15 @@ export function buildNextTurnPrompt(model: ReturnModel, conversation: Conversati
     "",
     "STILL OUTSTANDING PER THE DETERMINISTIC CHECKLIST (may be incomplete — use judgement too):",
     outstanding.length > 0 ? outstanding.map((t) => `- ${t}`).join("\n") : "- (nothing flagged)",
+    "",
+    "UNRESOLVED SOURCE DISAGREEMENTS (the app raises the reconcile card for these — do not ask about them yourself):",
+    unresolvedReconciliations.length > 0
+      ? unresolvedReconciliations.map((r) => `- ${r.modelPath}`).join("\n")
+      : "- (none)",
+    "",
+    'TOPICS THAT NEED A DOCUMENT OR A STATED FIGURE — use a "upload-or-tell" card, phrasing the',
+    "lead as what specifically is needed: a deduction dollar amount the user has raised, or the",
+    "rental figures once the user has said they have a rental property.",
     "",
     "Decide the single next thing to say. Return the JSON object.",
   ].join("\n");
@@ -122,7 +139,11 @@ export function buildApplyTurnPrompt(
 
 /** Strip an optional ```json fence and parse the first JSON object. Throws on failure. */
 export function parseJsonObject(raw: string): Record<string, unknown> {
-  const trimmed = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+  const trimmed = raw
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/, "")
+    .trim();
   const start = trimmed.indexOf("{");
   const end = trimmed.lastIndexOf("}");
   if (start === -1 || end === -1 || end < start) {
@@ -154,7 +175,9 @@ export function parseFieldUpdates(raw: unknown): FieldUpdate[] {
       throw new Error(`interview: update[${i}].path must be a string`);
     }
     if (typeof kind !== "string" || !(FIELD_UPDATE_KINDS as readonly string[]).includes(kind)) {
-      throw new Error(`interview: update[${i}].kind must be one of ${FIELD_UPDATE_KINDS.join("|")}`);
+      throw new Error(
+        `interview: update[${i}].kind must be one of ${FIELD_UPDATE_KINDS.join("|")}`,
+      );
     }
     if (
       value !== null &&

@@ -2,8 +2,10 @@ import type { ReturnModel } from "@aus-tax-lodge/model";
 
 import { firstUnresolvedConfirmation } from "./confirmations";
 import { appendTurn, type ConversationState, type PendingConfirmation } from "./conversation";
+import { readExtractionScratch } from "./extraction-scratch";
 import { incomeCheckpointLines } from "./income-summary";
 import type { InterviewStep } from "./interview";
+import { firstUnresolvedReconciliation } from "./reconciliation";
 
 /**
  * Extra context {@link applyInterviewStep} needs to build a card's real payload
@@ -13,10 +15,15 @@ import type { InterviewStep } from "./interview";
  * - `income-checkpoint` → `{ lines }` from {@link incomeCheckpointLines}.
  * - `confirm-figure` → `{ confirmation }`, the first unresolved
  *   {@link PendingConfirmation}.
+ * - `reconcile` (T6) → `{ reconciliation }`, the first unresolved
+ *   {@link import("@aus-tax-lodge/extraction").PendingReconciliation} from the
+ *   `__t16Extraction` scratch on `context.model`.
+ * - `upload-or-tell` (T6) → nothing beyond `payload.lead` (the assistant's lead
+ *   text is the whole ask).
  *
- * Optional so the two call sites (the `sendMessage` action and the `prefill`
- * route) pass only what they have; a `done` step or a plain `ask` / `say` needs
- * none of it.
+ * Optional so the three call sites (the `sendMessage` action, the `prefill`
+ * route and the `interview-document` route) pass only what they have; a `done`
+ * step or a plain `ask` / `say` needs none of it.
  */
 export interface InterviewStepContext {
   readonly model?: ReturnModel;
@@ -61,7 +68,15 @@ export function applyInterviewStep(
         payload.lines = context.model ? incomeCheckpointLines(context.model) : [];
       } else if (step.card === "confirm-figure") {
         payload.confirmation = firstUnresolvedConfirmation(context.pendingConfirmations ?? []);
+      } else if (step.card === "reconcile") {
+        // T6: the first unresolved source disagreement from T16's scratch — the
+        // card names both values + sources and asks which is right (PRD FR-7).
+        payload.reconciliation = context.model
+          ? firstUnresolvedReconciliation(readExtractionScratch(context.model))
+          : null;
       }
+      // `upload-or-tell` (T6) needs nothing beyond `payload.lead` — the assistant's
+      // lead text is the whole ask (one topic, two paths; never a checklist).
       return appendTurn(conversation, {
         role: "assistant",
         kind: "card",
