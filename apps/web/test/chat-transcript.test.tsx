@@ -46,14 +46,15 @@ describe("ChatTranscript (PRD FR-1, FR-12)", () => {
         filename: "prefill-2025-26.pdf",
         docId: "d1",
       }),
-      turn({
+      // A card type with no registered body — still the placeholder shell.
+      // (Every real `CardRef` now has a body; this exercises the fallback path.)
+      {
         id: "4",
         at: "t",
         role: "assistant",
         kind: "card",
-        // A card type no task has built a body for yet — still the placeholder shell.
-        card: { type: "review-summary" },
-      }),
+        card: { type: "future-card" },
+      } as unknown as ConversationTurn,
     ];
 
     const { container } = renderTranscript({ turns });
@@ -62,11 +63,9 @@ describe("ChatTranscript (PRD FR-1, FR-12)", () => {
     expect(text.indexOf("Hello from the assistant")).toBeGreaterThanOrEqual(0);
     expect(text.indexOf("Hello from the assistant")).toBeLessThan(text.indexOf("Hi back"));
     expect(text.indexOf("Hi back")).toBeLessThan(text.indexOf("prefill-2025-26.pdf"));
-    expect(text.indexOf("prefill-2025-26.pdf")).toBeLessThan(
-      text.indexOf("Review your whole return"),
-    );
+    expect(text.indexOf("prefill-2025-26.pdf")).toBeLessThan(text.indexOf("future-card"));
 
-    const card = container.querySelector('[data-card-type="review-summary"]');
+    const card = container.querySelector('[data-card-type="future-card"]');
     expect(card).not.toBeNull();
     expect(card?.textContent).toMatch(/handled later in the interview/i);
   });

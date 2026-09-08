@@ -5,8 +5,24 @@ import { redirect } from "next/navigation";
 import type { ReturnModel } from "@aus-tax-lodge/model";
 
 import { resolveReconciliation } from "@aus-tax-lodge/extraction";
+import { buildLodgeInstructionsData } from "@aus-tax-lodge/export";
 
 import { getClaudeClient } from "../../../lib/ai/client";
+import { maybeRunningEstimate } from "../../../lib/estimate/running-estimate";
+import {
+  acknowledgeWarnings,
+  readAcknowledgedWarningIds,
+} from "../../../lib/export/acknowledgements";
+import { MIN_ARCHIVE_PASSWORD_LENGTH } from "../../../lib/export/archive";
+import { buildExportInput, loadExportContext } from "../../../lib/export/context";
+import { computeExportGate } from "../../../lib/export/gate";
+import { markReturnExported } from "../../../lib/export/persist";
+import { topicsOutstanding } from "../../../lib/interview/topics";
+import {
+  reopenQuestionFor,
+  reviewSummaryForModel,
+  type ReviewSummary,
+} from "../../../lib/review-summary";
 import {
   confirmFieldAtPath,
   editFieldAtPath,
@@ -21,6 +37,7 @@ import {
 import {
   appendTurn,
   emptyConversation,
+  type AssistantCardTurn,
   type ConversationState,
   type PendingConfirmation,
 } from "../../../lib/conversation";
@@ -57,6 +74,23 @@ import {
 
 const PROBLEM_REPLY =
   "I hit a problem working through that just now — send it again and I'll pick it back up.";
+
+const REVIEW_CANNED_REPLY =
+  "We're at the review stage — use the summary above to approve your return or reopen a line. " +
+  "If a figure is wrong, tell me the corrected number and I'll rebuild the summary.";
+
+/**
+ * {@link maybeRunningEstimate} re-throws an unexpected engine error; the chat
+ * round-trip must never 500 on it (T10 hardens this generally). A `null` here
+ * just routes the message through the normal flow.
+ */
+function safeRunningEstimate(model: ReturnModel, text: string): string | null {
+  try {
+    return maybeRunningEstimate(model, text);
+  } catch {
+    return null;
+  }
+}
 
 const PHASE_CLOSED_REPLY: Partial<Record<ConversationState["phase"], string>> = {
   review:
@@ -150,6 +184,56 @@ export async function sendMessage(
     return { conversation: next, revision: result.envelope.revision };
   };
 
+  const say = (next: ConversationState, text: string): ConversationState =>
+    appendTurn(next, { role: "assistant", kind: "message", text });
+
+  // --- Review phase: a running-estimate question or a free-text correction ---
+  // (PRD FR-10, FR-11). A clear correction re-issues the whole-return summary;
+  // anything else points back to the summary already on screen.
+  if (conversation.phase === "review") {
+    const running = safeRunningEstimate(model, trimmed);
+    if (running) return persist(say(withUser, running), model);
+
+    const client = getClaudeClient();
+    let applied: Awaited<ReturnType<typeof applyUserTurn>>;
+    try {
+      applied = await applyUserTurn({ model, conversation, text: trimmed, client });
+    } catch {
+      return persist(say(withUser, REVIEW_CANNED_REPLY), model);
+    }
+
+    if (applied.outOfScope && applied.outOfScope.length > 0) {
+      const findings = applied.outOfScope;
+      const stopped: ConversationState = {
+        ...appendTurn(withUser, {
+          role: "assistant",
+          kind: "card",
+          card: { type: "out-of-scope", payload: { findings } },
+        }),
+        phase: "stopped",
+        stoppedReason: findings[0]!.item,
+      };
+      // The model is NOT persisted past the stop (PRD FR-9) — save the loaded one.
+      return persist(stopped, model);
+    }
+
+    if (applied.appliedPaths.length > 0 && !applied.clarify) {
+      const nextModel = applied.model;
+      let next = say(
+        withUser,
+        "I've updated that — here's the revised summary of your whole return.",
+      );
+      next = appendTurn(next, {
+        role: "assistant",
+        kind: "card",
+        card: { type: "review-summary", payload: { summary: reviewSummaryForModel(nextModel) } },
+      });
+      return persist(next, nextModel);
+    }
+
+    return persist(say(withUser, applied.clarify ?? REVIEW_CANNED_REPLY), model);
+  }
+
   // --- Not the interview: a short, phase-appropriate reply --------------------
   if (conversation.phase !== "interview") {
     const reply =
@@ -165,6 +249,11 @@ export async function sendMessage(
   }
 
   // --- The interview loop ----------------------------------------------------
+  // A "how's my refund looking?" question is answered from the deterministic
+  // engine (PRD FR-10) before any field mapping — Claude never states a figure.
+  const running = safeRunningEstimate(model, trimmed);
+  if (running) return persist(say(withUser, running), model);
+
   const client = getClaudeClient();
 
   let applied: Awaited<ReturnType<typeof applyUserTurn>>;
@@ -618,4 +707,257 @@ export async function resolveReconcile(
 export async function deleteReturn(returnId: string): Promise<void> {
   await getReturnRepository().deleteReturn(returnId);
   redirect("/");
+}
+
+// ---------------------------------------------------------------------------
+// The whole-return review checkpoint (PRD FR-5, FR-10, FR-11) — the
+// `review-summary` card's two controls: reopen one line, or approve + export.
+// ---------------------------------------------------------------------------
+
+/** A rejected review line → a matcher for the `pendingConfirmation`s it should re-open. */
+const REOPEN_LINE_MATCHERS: Readonly<Record<string, RegExp>> = {
+  "salary-wages": /^income\.salaryWages/,
+  "payg-withheld": /paygWithheld/,
+  interest: /^income\.interestAccounts/,
+  dividends: /^income\.dividends/,
+  "government-allowances": /governmentAllowances/i,
+  rental: /^rental\./,
+  deductions: /^deductions\./,
+  "private-health": /^privateHealth\./,
+};
+
+function reviewSummaryFromCard(
+  conversation: ConversationState,
+  cardId: string,
+): ReviewSummary | null {
+  const card = conversation.turns.find(
+    (t): t is AssistantCardTurn => t.role === "assistant" && t.kind === "card" && t.id === cardId,
+  );
+  const payload = card?.card.payload;
+  if (!payload || typeof payload !== "object") return null;
+  const summary = (payload as { summary?: unknown }).summary;
+  return summary && typeof summary === "object" ? (summary as ReviewSummary) : null;
+}
+
+/**
+ * "That's not right" on one review line (PRD FR-5): drop back to the interview,
+ * record the rejection, ask about that line again, and loosen any matching
+ * `pendingConfirmation` so it is re-checked. The interview is **not** advanced
+ * here — the assistant has asked its question and the user's next message
+ * drives it (mirrors {@link tellFigureInstead}); advancing would let a still
+ * deterministically-complete model bounce straight back to a fresh summary.
+ */
+export async function reopenLine(
+  returnId: string,
+  expectedRevision: number,
+  cardId: string,
+  lineKey: string,
+): Promise<SendMessageResult> {
+  let loaded: LoadedConversation;
+  try {
+    loaded = await loadConversation(returnId);
+  } catch {
+    return {
+      conversation: emptyConversation(),
+      revision: 0,
+      error: "Couldn't load this return. Reload the page and try again.",
+    };
+  }
+  if (loaded.readOnly) {
+    return {
+      conversation: loaded.conversation,
+      revision: loaded.envelope.revision,
+      error: "This return is locked and can't be changed.",
+    };
+  }
+  if (loaded.conversation.phase !== "review") {
+    return {
+      conversation: loaded.conversation,
+      revision: loaded.envelope.revision,
+      error: "There's nothing to reopen — the review isn't open.",
+    };
+  }
+
+  const summary = reviewSummaryFromCard(loaded.conversation, cardId);
+  const label = summary?.lines.find((l) => l.lineKey === lineKey)?.label ?? lineKey;
+
+  const matcher = REOPEN_LINE_MATCHERS[lineKey];
+  const pendingConfirmations = matcher
+    ? loaded.conversation.pendingConfirmations.map((c) =>
+        matcher.test(c.modelPath) ? { ...c, resolved: false } : c,
+      )
+    : loaded.conversation.pendingConfirmations;
+
+  let base: ConversationState = {
+    ...loaded.conversation,
+    phase: "interview",
+    pendingConfirmations,
+  };
+  base = appendTurn(base, {
+    role: "user",
+    kind: "card-response",
+    cardId,
+    response: { rejected: lineKey, lineKey },
+  });
+  base = appendTurn(base, {
+    role: "assistant",
+    kind: "message",
+    text: reopenQuestionFor(lineKey, label),
+  });
+
+  return persistCardTurn(returnId, expectedRevision, loaded, base, loaded.model);
+}
+
+/** The result of an {@link approveReturn} attempt (PRD FR-11, FR-14). */
+export interface ApproveReturnResult {
+  readonly ok: boolean;
+  /** Validation warnings must be acknowledged before the package builds. */
+  readonly needsWarningAck?: boolean;
+  readonly warnings?: readonly { readonly id: string; readonly message: string }[];
+  /** Blocking validation errors — the return can't be exported until they're fixed. */
+  readonly blockedErrors?: readonly string[];
+  /** `true` when the conversation moved to `exported` and the card should download the archive. */
+  readonly archiveReady?: boolean;
+  readonly conversation?: ConversationState;
+  readonly revision?: number;
+  readonly error?: string;
+}
+
+/**
+ * "Approve" on the review summary (PRD FR-5, FR-11, FR-14): run the FR-13/FR-14
+ * export gate, and on a pass move the conversation to `exported` and tell the
+ * card to download the encrypted records archive. The archive itself is built
+ * by `POST /api/returns/:id/export/archive` — this action never sees the file,
+ * only gates it and advances the conversation. The password is validated for
+ * length here and passed straight to that route by the card; it is never
+ * logged, persisted or put in a query string.
+ */
+export async function approveReturn(
+  returnId: string,
+  expectedRevision: number,
+  cardId: string,
+  password: string,
+  acknowledgeWarningIds?: readonly string[],
+): Promise<ApproveReturnResult> {
+  let loaded: LoadedConversation;
+  try {
+    loaded = await loadConversation(returnId);
+  } catch {
+    return { ok: false, error: "Couldn't load this return. Reload the page and try again." };
+  }
+  if (loaded.readOnly) {
+    return { ok: false, error: "This return is locked and can't be changed." };
+  }
+  if (loaded.conversation.phase !== "review") {
+    return { ok: false, error: "This return isn't at the review stage." };
+  }
+
+  if (typeof password !== "string" || password.length < MIN_ARCHIVE_PASSWORD_LENGTH) {
+    return {
+      ok: false,
+      error: `Choose a records-archive password of at least ${MIN_ARCHIVE_PASSWORD_LENGTH} characters.`,
+    };
+  }
+
+  let context: Awaited<ReturnType<typeof loadExportContext>>;
+  try {
+    context = await loadExportContext(returnId);
+  } catch {
+    return { ok: false, error: "Couldn't prepare the export for this return." };
+  }
+  if (!context.ready || !context.assessment) {
+    const missing = topicsOutstanding(context.model);
+    return {
+      ok: false,
+      error: `still missing: ${missing.length > 0 ? missing.join("; ") : "a few remaining details"}`,
+    };
+  }
+
+  const requested = acknowledgeWarningIds ?? [];
+  let gate = computeExportGate(
+    context.model,
+    context.assessment,
+    await readAcknowledgedWarningIds(returnId),
+  );
+  if (gate.blocked) {
+    return { ok: false, blockedErrors: gate.errors.map((e) => e.message) };
+  }
+  if (!gate.allWarningsAcknowledged) {
+    const unacked = gate.warnings.filter((w) => !w.acknowledged).map((w) => w.id);
+    const covered = unacked.every((id) => requested.includes(id));
+    if (!covered) {
+      return {
+        ok: false,
+        needsWarningAck: true,
+        warnings: gate.warnings.map((w) => ({ id: w.id, message: w.message })),
+      };
+    }
+    await acknowledgeWarnings(returnId, requested);
+    gate = computeExportGate(
+      context.model,
+      context.assessment,
+      await readAcknowledgedWarningIds(returnId),
+    );
+    if (!gate.downloadsEnabled) {
+      return gate.blocked
+        ? { ok: false, blockedErrors: gate.errors.map((e) => e.message) }
+        : {
+            ok: false,
+            needsWarningAck: true,
+            warnings: gate.warnings.map((w) => ({ id: w.id, message: w.message })),
+          };
+    }
+  }
+
+  const generatedAt = new Date().toISOString();
+  const input = buildExportInput(context, await readAcknowledgedWarningIds(returnId), generatedAt);
+  const firstSteps = buildLodgeInstructionsData(input)
+    .steps.slice(0, 3)
+    .map((step) => step.heading)
+    .join(" ");
+  const message =
+    "Your lodgement package is ready — the encrypted archive will download now. " +
+    `To lodge: ${firstSteps} ` +
+    "Keep the archive password somewhere safe; it isn't stored.";
+
+  let next: ConversationState = appendTurn(loaded.conversation, {
+    role: "user",
+    kind: "card-response",
+    cardId,
+    response: { approved: true },
+  });
+  next = appendTurn(next, { role: "assistant", kind: "message", text: message });
+  next = { ...next, phase: "exported" };
+
+  let result: Awaited<ReturnType<typeof saveConversation>>;
+  try {
+    result = await saveConversation(returnId, {
+      model: loaded.model,
+      conversation: next,
+      expectedRevision,
+    });
+  } catch (error) {
+    if (error instanceof ConversationReadOnlyError) {
+      return { ok: false, error: "This return is locked and can't be changed." };
+    }
+    throw error;
+  }
+  if (result.conflict) {
+    const fresh = await loadConversation(returnId);
+    return {
+      ok: false,
+      error: "This return changed in another tab — reload to see the latest version.",
+      conversation: fresh.conversation,
+      revision: fresh.envelope.revision,
+    };
+  }
+
+  await markReturnExported(returnId);
+
+  return {
+    ok: true,
+    archiveReady: true,
+    conversation: next,
+    revision: result.envelope.revision,
+  };
 }

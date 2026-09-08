@@ -13,6 +13,7 @@ import {
 } from "../lib/conversation";
 import { withExtractionScratch } from "../lib/extraction-scratch";
 import { applyInterviewStep } from "../lib/interview-loop";
+import { exportableModel } from "./export-fixtures";
 
 const CONVO: ConversationState = { ...emptyConversation(), phase: "interview" };
 
@@ -85,5 +86,25 @@ describe("applyInterviewStep — reconcile (PRD FR-7)", () => {
   it("falls back to a null reconciliation when there is no model in context", () => {
     const next = applyInterviewStep(CONVO, { kind: "card", card: "reconcile" });
     expect(lastCard(next).card.payload).toEqual({ reconciliation: null });
+  });
+});
+
+describe("applyInterviewStep — done (PRD FR-5, FR-10)", () => {
+  it("moves to review and bakes the whole-return summary into the review-summary card", () => {
+    const next = applyInterviewStep(CONVO, { kind: "done" }, { model: exportableModel() });
+
+    expect(next.phase).toBe("review");
+    const card = lastCard(next);
+    expect(card.card.type).toBe("review-summary");
+    const payload = card.card.payload as { summary?: { incomplete?: boolean; headline?: unknown } };
+    expect(payload.summary).toBeDefined();
+    expect(payload.summary!.incomplete).toBe(false);
+    expect(payload.summary!.headline).not.toBeNull();
+  });
+
+  it("carries an empty payload when the done step has no model", () => {
+    const next = applyInterviewStep(CONVO, { kind: "done" });
+    expect(next.phase).toBe("review");
+    expect(lastCard(next).card.payload).toEqual({});
   });
 });

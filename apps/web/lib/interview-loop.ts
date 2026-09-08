@@ -6,6 +6,7 @@ import { readExtractionScratch } from "./extraction-scratch";
 import { incomeCheckpointLines } from "./income-summary";
 import type { InterviewStep } from "./interview";
 import { firstUnresolvedReconciliation } from "./reconciliation";
+import { reviewSummaryForModel } from "./review-summary";
 
 /**
  * Extra context {@link applyInterviewStep} needs to build a card's real payload
@@ -43,7 +44,8 @@ export interface InterviewStepContext {
  *   above the card body. `income-checkpoint` / `confirm-figure` additionally
  *   carry their card data from `context`; T6–T8 own the other card payloads.
  * - `done` → the interview is complete: move to the `review` phase and drop in
- *   the `review-summary` card (T8 gives it a body).
+ *   the `review-summary` card, its payload the whole-return summary built from
+ *   `context.model` by {@link reviewSummaryForModel} (PRD FR-5, FR-10).
  *
  * Pure — returns a new state, never mutates the input.
  */
@@ -83,10 +85,12 @@ export function applyInterviewStep(
         card: { type: step.card, payload },
       });
     }
-    case "done":
+    case "done": {
+      const payload = context.model ? { summary: reviewSummaryForModel(context.model) } : {};
       return appendTurn(
         { ...conversation, phase: "review" },
-        { role: "assistant", kind: "card", card: { type: "review-summary", payload: {} } },
+        { role: "assistant", kind: "card", card: { type: "review-summary", payload } },
       );
+    }
   }
 }

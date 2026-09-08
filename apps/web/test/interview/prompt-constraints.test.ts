@@ -22,4 +22,9 @@ describe("interview system prompts — the assistant never advises (issue #67)",
   it("NEXT_TURN_SYSTEM no longer offers 'out-of-scope' as a card type Claude can pick", () => {
     expect(NEXT_TURN_SYSTEM).not.toContain('"out-of-scope"');
   });
+
+  it("NEXT_TURN_SYSTEM does not offer 'review-summary' as a card Claude can pick (T8, #68)", () => {
+    // The whole-return review is produced only by the deterministic `done` case.
+    expect(NEXT_TURN_SYSTEM).not.toContain('"review-summary"');
+  });
 });

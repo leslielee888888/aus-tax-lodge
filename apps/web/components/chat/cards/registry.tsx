@@ -3,6 +3,7 @@ import { ConfirmFigureCard } from "./ConfirmFigureCard";
 import { IncomeCheckpointCard } from "./IncomeCheckpointCard";
 import { OutOfScopeCard } from "./OutOfScopeCard";
 import { ReconcileCard } from "./ReconcileCard";
+import { ReviewSummaryCard } from "./ReviewSummaryCard";
 import type { CardComponent, CardComponentMap } from "./types";
 import { UploadOrTellCard } from "./UploadOrTellCard";
 import { UploadPrefillCard } from "./UploadPrefillCard";
@@ -19,6 +20,7 @@ export const CARD_COMPONENTS: CardComponentMap = {
   "upload-or-tell": UploadOrTellCard,
   reconcile: ReconcileCard,
   "out-of-scope": OutOfScopeCard,
+  "review-summary": ReviewSummaryCard,
 };
 
 export function cardComponentFor(type: CardRef): CardComponent | undefined {
