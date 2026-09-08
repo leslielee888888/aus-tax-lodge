@@ -22,6 +22,13 @@ import {
 import { topicsOutstanding } from "./topics";
 import type { InterviewClient, InterviewStep } from "./types";
 
+/**
+ * The card types `nextTurn` may emit. `out-of-scope` is deliberately **absent**:
+ * a scope hard stop is decided deterministically (`detectOutOfScope`, run in
+ * `apply-user-turn` and `lib/scope-check`), never by Claude. A Claude reply
+ * naming `"out-of-scope"` fails `parseStep` and is caught → safe fallback,
+ * rather than producing a card without `phase:"stopped"` (PRD FR-9, FR-20).
+ */
 const CARD_REFS: readonly CardRef[] = [
   "upload-prefill",
   "income-checkpoint",
@@ -29,7 +36,6 @@ const CARD_REFS: readonly CardRef[] = [
   "upload-or-tell",
   "reconcile",
   "review-summary",
-  "out-of-scope",
 ];
 
 export interface NextTurnInput {

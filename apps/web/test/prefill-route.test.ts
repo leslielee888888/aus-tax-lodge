@@ -14,6 +14,7 @@ const {
   extractDocument,
   applyExtractions,
   nextTurn,
+  checkModelInScope,
 } = vi.hoisted(() => ({
   ingestUploads: vi.fn(),
   loadConversation: vi.fn(),
@@ -22,6 +23,7 @@ const {
   extractDocument: vi.fn(),
   applyExtractions: vi.fn(),
   nextTurn: vi.fn(),
+  checkModelInScope: vi.fn(),
 }));
 
 vi.mock("../lib/documents", () => ({ ingestUploads }));
@@ -33,6 +35,7 @@ vi.mock("../lib/returns", () => ({
   ConversationReadOnlyError: class ConversationReadOnlyError extends Error {},
 }));
 vi.mock("../lib/interview", () => ({ nextTurn }));
+vi.mock("../lib/scope-check", () => ({ checkModelInScope }));
 vi.mock("@aus-tax-lodge/ai", () => ({ classifyDocument }));
 vi.mock("@aus-tax-lodge/extraction", () => ({ extractDocument, applyExtractions }));
 
@@ -87,6 +90,11 @@ beforeEach(() => {
   vi.clearAllMocks();
   loadConversation.mockResolvedValue(loadedUpload());
   saveConversation.mockResolvedValue({ conflict: false, envelope: { revision: 5 } });
+  // Default: the seeded model is in scope — hand it straight back.
+  checkModelInScope.mockImplementation(async ({ model }: { model: unknown }) => ({
+    findings: [],
+    model,
+  }));
   ingestUploads.mockResolvedValue({
     status: 201,
     body: {
@@ -163,6 +171,53 @@ describe("POST /api/returns/:id/prefill (PRD FR-1, FR-2)", () => {
     // Extraction bookkeeping rides along on the saved model.
     const savedModel = saveConversation.mock.calls[0]![1].model as Record<string, unknown>;
     expect(savedModel.__t16Extraction).toMatchObject({ extracted: [{ docId: "doc1", figuresCount: 1 }] });
+  });
+
+  it("hard-stops when the seeded model is out of scope — no interview, loaded model kept", async () => {
+    extractDocument.mockResolvedValue({
+      docId: "doc1",
+      documentType: "ato-prefill-report",
+      figures: [],
+    });
+    const seeded = modelWithSalary();
+    applyExtractions.mockReturnValue({ model: seeded, pendingReconciliation: [] });
+    checkModelInScope.mockResolvedValue({
+      findings: [
+        {
+          code: "capital-gains",
+          item: "Capital gains event",
+          detail: "A CGT event needs a calculation this assistant does not do.",
+          source: "document",
+        },
+      ],
+      model: seeded,
+    });
+
+    const res = await POST(request(), ctx);
+    const body = await res.json();
+
+    expect(body.ok).toBe(false);
+    expect(body.reason).toBe("out-of-scope");
+    expect(body.revision).toBe(5);
+    expect(nextTurn).not.toHaveBeenCalled();
+
+    const saved = savedConversation();
+    expect(saved.phase).toBe("stopped");
+    expect(saved.stoppedReason).toBe("Capital gains event");
+
+    const kinds = saved.turns.map((t) => `${t.role}:${t.kind}`);
+    expect(kinds).toEqual(["user:file", "assistant:card"]);
+    expect(saved.turns[1]).toMatchObject({
+      role: "assistant",
+      kind: "card",
+      card: { type: "out-of-scope" },
+    });
+    expect(
+      (saved.turns[1] as { card: { payload: { findings: unknown[] } } }).card.payload.findings,
+    ).toHaveLength(1);
+
+    // FR-9: the out-of-scope extraction is NOT persisted — the loaded model is kept.
+    expect(saveConversation.mock.calls[0]![1].model).toBe(EMPTY_MODEL);
   });
 
   it("does not crash or advance when extraction throws", async () => {

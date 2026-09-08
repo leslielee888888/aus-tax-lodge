@@ -143,4 +143,11 @@ describe("nextTurn (PRD FR-3)", () => {
       nextTurn({ model: seededIncomeOnly(), conversation: CONVO, client }),
     ).rejects.toThrow(/JSON/i);
   });
+
+  it("rejects an 'out-of-scope' card — a scope hard stop is deterministic, never Claude's call", async () => {
+    const { client } = mockClient(JSON.stringify({ kind: "card", card: "out-of-scope" }));
+    await expect(
+      nextTurn({ model: seededIncomeOnly(), conversation: CONVO, client }),
+    ).rejects.toThrow(/unknown card type/i);
+  });
 });

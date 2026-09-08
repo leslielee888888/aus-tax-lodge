@@ -50,6 +50,12 @@ export function applyInterviewStep(
     case "say":
       return appendTurn(conversation, { role: "assistant", kind: "message", text: step.text });
     case "card": {
+      // A scope hard stop is deterministic (`detectOutOfScope`), never Claude's
+      // call — `nextTurn`'s `CARD_REFS` no longer lists `out-of-scope`, so this
+      // branch is unreachable for that type. Guard anyway: an `out-of-scope`
+      // card here would render a hard stop WITHOUT `phase:"stopped"`, leaving
+      // the composer live (PRD FR-9). Fall through to a no-op instead.
+      if (step.card === "out-of-scope") return conversation;
       const payload: Record<string, unknown> = step.text ? { lead: step.text } : {};
       if (step.card === "income-checkpoint") {
         payload.lines = context.model ? incomeCheckpointLines(context.model) : [];

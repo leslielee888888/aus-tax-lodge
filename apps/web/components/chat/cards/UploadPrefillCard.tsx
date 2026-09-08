@@ -17,9 +17,11 @@ import type { CardProps } from "./types";
  * hands the server's updated conversation back to `ChatScreen` via
  * {@link CardProps.onResult}. A wrong-type or unreadable response keeps the
  * zone active so the user can try again (the assistant's explanation is already
- * in the returned transcript).
+ * in the returned transcript). An `out-of-scope` response is a hard stop
+ * (PRD FR-9): the zone locks and the new `out-of-scope` card + hidden composer
+ * in the re-rendered transcript carry the rest.
  */
-type Phase = "idle" | "uploading" | "reading" | "accepted" | "error";
+type Phase = "idle" | "uploading" | "reading" | "accepted" | "error" | "stopped";
 
 interface PrefillResponse {
   readonly ok: boolean;
@@ -48,7 +50,8 @@ export function UploadPrefillCard({ returnId, turn, readOnly, onResult }: CardPr
 
   const { where, freshnessNote } = helpCopy(turn.card.payload);
   const busy = phase === "uploading" || phase === "reading";
-  const disabled = readOnly || busy || phase === "accepted";
+  const terminal = phase === "accepted" || phase === "stopped";
+  const disabled = readOnly || busy || terminal;
 
   async function submit(file: File) {
     setMessage(null);
@@ -87,6 +90,13 @@ export function UploadPrefillCard({ returnId, turn, readOnly, onResult }: CardPr
 
     if (payload.ok) {
       setPhase("accepted");
+      return;
+    }
+
+    if (payload.reason === "out-of-scope") {
+      // Hard stop — the re-rendered transcript now carries the `out-of-scope`
+      // card and a hidden composer; the zone just locks.
+      setPhase("stopped");
       return;
     }
 
@@ -138,13 +148,15 @@ export function UploadPrefillCard({ returnId, turn, readOnly, onResult }: CardPr
           <p className="text-[13px]">
             {phase === "accepted"
               ? "Pre-fill report received — reading it now."
-              : busy
-                ? phase === "uploading"
-                  ? "Uploading…"
-                  : "Reading your report…"
-                : "Drag your pre-fill report here (PDF)"}
+              : phase === "stopped"
+                ? "This return can't continue — see the note below."
+                : busy
+                  ? phase === "uploading"
+                    ? "Uploading…"
+                    : "Reading your report…"
+                  : "Drag your pre-fill report here (PDF)"}
           </p>
-          {phase !== "accepted" ? (
+          {!terminal ? (
             <p className="text-[12px] text-muted">
               or{" "}
               <label

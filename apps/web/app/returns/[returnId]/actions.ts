@@ -1,5 +1,7 @@
 "use server";
 
+import { redirect } from "next/navigation";
+
 import type { ReturnModel } from "@aus-tax-lodge/model";
 
 import { getClaudeClient } from "../../../lib/ai/client";
@@ -20,6 +22,7 @@ import { applyUserTurn, nextTurn } from "../../../lib/interview";
 import { applyInterviewStep } from "../../../lib/interview-loop";
 import {
   ConversationReadOnlyError,
+  getReturnRepository,
   loadConversation,
   saveConversation,
   type LoadedConversation,
@@ -489,4 +492,23 @@ export async function resolveConfirmation(
     pendingConfirmations: resolved,
   };
   return advanceInterview(returnId, expectedRevision, loaded, base, model);
+}
+
+// ---------------------------------------------------------------------------
+// Out-of-scope hard stop (PRD FR-9, FR-20) — the only way out of the chat
+// ---------------------------------------------------------------------------
+
+/**
+ * Permanently delete a return and its documents, then send the user home
+ * (PRD FR-9, FR-20). Invoked from the `out-of-scope` card — a hard-stopped
+ * conversation offers this and a pointer to ATO myTax / a registered tax agent,
+ * and nothing else. The store's `deleteReturn` recursively removes every
+ * document and `return.json`.
+ *
+ * This is the v2 chat tree's own copy — v1's `review/actions.ts`
+ * `deleteReturnAction` goes away with the `review/` directory in T11.
+ */
+export async function deleteReturn(returnId: string): Promise<void> {
+  await getReturnRepository().deleteReturn(returnId);
+  redirect("/");
 }
