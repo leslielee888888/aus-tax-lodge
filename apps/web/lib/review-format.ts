@@ -1,4 +1,4 @@
-/** Formatting helpers shared by the review screen's server-built rows and client rows. */
+/** Money formatting for the estimate breakdown rows (`lib/estimate/breakdown.ts`). */
 
 /** `1234.5` → `"$1,234.50"`; whole-dollar values drop the cents; `null` → `"—"`. Negative values use a minus sign (a rental loss). */
 export function formatMoney(value: number | null | undefined): string {
@@ -10,14 +10,4 @@ export function formatMoney(value: number | null | undefined): string {
     maximumFractionDigits: 2,
   });
   return `${value < 0 ? "−" : ""}$${formatted}`;
-}
-
-/** A plain count/number, or `"—"` for `null`. */
-export function formatCount(value: number | null | undefined): string {
-  return value == null ? "—" : value.toLocaleString("en-AU");
-}
-
-/** `50` → `"50%"`, `null` → `"—"`. */
-export function formatPercent(value: number | null | undefined): string {
-  return value == null ? "—" : `${value}%`;
 }
