@@ -4,6 +4,7 @@ import { useEffect, useOptimistic, useRef, useState, useTransition } from "react
 
 import { sendMessage } from "../../app/returns/[returnId]/actions";
 import type { ConversationState, ConversationTurn } from "../../lib/conversation";
+import type { CardResult } from "./cards/types";
 import { ChatComposer } from "./ChatComposer";
 import { ChatTranscript } from "./ChatTranscript";
 
@@ -61,6 +62,13 @@ export function ChatScreen({
 
   const composerHidden = readOnly || conversation.phase === "stopped";
 
+  function handleCardResult(result: CardResult) {
+    setError(null);
+    setConflict(false);
+    setConversation(result.conversation);
+    setRevision(result.revision);
+  }
+
   function handleSend(text: string) {
     setError(null);
     setConflict(false);
@@ -76,7 +84,14 @@ export function ChatScreen({
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-4 md:px-10">
-      <ChatTranscript turns={optimisticConversation.turns} typing={isPending} />
+      <ChatTranscript
+        turns={optimisticConversation.turns}
+        returnId={returnId}
+        revision={revision}
+        readOnly={readOnly}
+        onCardResult={handleCardResult}
+        typing={isPending}
+      />
       <div ref={bottomRef} />
 
       {conflict ? (

@@ -11,6 +11,22 @@ function turn(partial: ConversationTurn): ConversationTurn {
   return partial;
 }
 
+function renderTranscript(
+  props: Partial<Parameters<typeof ChatTranscript>[0]> & {
+    turns: readonly ConversationTurn[];
+  },
+) {
+  return render(
+    <ChatTranscript
+      returnId="ret1"
+      revision={1}
+      readOnly={false}
+      onCardResult={() => {}}
+      {...props}
+    />,
+  );
+}
+
 describe("ChatTranscript (PRD FR-1, FR-12)", () => {
   it("renders assistant / user / file-chip / card-placeholder turns in order", () => {
     const turns: ConversationTurn[] = [
@@ -39,7 +55,7 @@ describe("ChatTranscript (PRD FR-1, FR-12)", () => {
       }),
     ];
 
-    const { container } = render(<ChatTranscript turns={turns} />);
+    const { container } = renderTranscript({ turns });
     const text = container.textContent ?? "";
 
     expect(text.indexOf("Hello from the assistant")).toBeGreaterThanOrEqual(0);
@@ -55,14 +71,12 @@ describe("ChatTranscript (PRD FR-1, FR-12)", () => {
   });
 
   it("labels each turn by role and exposes a live log region", () => {
-    render(
-      <ChatTranscript
-        turns={[
-          turn({ id: "1", at: "t", role: "assistant", kind: "message", text: "A" }),
-          turn({ id: "2", at: "t", role: "user", kind: "message", text: "B" }),
-        ]}
-      />,
-    );
+    renderTranscript({
+      turns: [
+        turn({ id: "1", at: "t", role: "assistant", kind: "message", text: "A" }),
+        turn({ id: "2", at: "t", role: "user", kind: "message", text: "B" }),
+      ],
+    });
 
     expect(screen.getByRole("log")).toBeTruthy();
     expect(screen.getByRole("article", { name: "Assistant" })).toBeTruthy();
@@ -70,32 +84,38 @@ describe("ChatTranscript (PRD FR-1, FR-12)", () => {
   });
 
   it("renders a card-response turn as a user bubble", () => {
-    render(
-      <ChatTranscript
-        turns={[
-          turn({
-            id: "1",
-            at: "t",
-            role: "user",
-            kind: "card-response",
-            cardId: "c1",
-            response: {},
-          }),
-        ]}
-      />,
-    );
+    renderTranscript({
+      turns: [
+        turn({
+          id: "1",
+          at: "t",
+          role: "user",
+          kind: "card-response",
+          cardId: "c1",
+          response: {},
+        }),
+      ],
+    });
     expect(screen.getByText(/response recorded/i)).toBeTruthy();
   });
 
-  it("shows the first-load upload prompt when the conversation is empty", () => {
-    const { container } = render(<ChatTranscript turns={[]} />);
+  it("renders the registered drop-zone body for an upload-prefill card, not the placeholder", () => {
+    const { container } = renderTranscript({
+      turns: [
+        turn({
+          id: "1",
+          at: "t",
+          role: "assistant",
+          kind: "card",
+          card: { type: "upload-prefill", payload: {} },
+        }),
+      ],
+    });
 
-    expect(
-      screen.getByText(
-        "Hi — I'll help you put together your 2025–26 return. To start, upload your ATO pre-fill report.",
-      ),
-    ).toBeTruthy();
-    expect(container.querySelector('[data-card-type="upload-prefill"]')).not.toBeNull();
+    const card = container.querySelector('[data-card-type="upload-prefill"]');
+    expect(card).not.toBeNull();
+    expect(card?.textContent).toMatch(/drag your pre-fill report here/i);
+    expect(card?.textContent).not.toMatch(/handled later in the interview/i);
   });
 
   it("shows the thinking affordance only while typing", () => {
@@ -103,10 +123,19 @@ describe("ChatTranscript (PRD FR-1, FR-12)", () => {
       turn({ id: "1", at: "t", role: "user", kind: "message", text: "hello" }),
     ];
 
-    const { rerender } = render(<ChatTranscript turns={base} />);
+    const { rerender } = renderTranscript({ turns: base });
     expect(screen.queryByText(/the assistant is thinking/i)).toBeNull();
 
-    rerender(<ChatTranscript turns={base} typing />);
+    rerender(
+      <ChatTranscript
+        turns={base}
+        returnId="ret1"
+        revision={1}
+        readOnly={false}
+        onCardResult={() => {}}
+        typing
+      />,
+    );
     expect(screen.getByText(/the assistant is thinking/i)).toBeTruthy();
   });
 });

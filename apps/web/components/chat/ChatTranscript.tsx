@@ -1,19 +1,31 @@
 import type { ReactNode } from "react";
 
 import { CheckIcon, MarkIcon, UserIcon } from "../icons";
-import type { AssistantCard, ConversationTurn } from "../../lib/conversation";
+import type {
+  AssistantCard,
+  AssistantCardTurn,
+  ConversationTurn,
+} from "../../lib/conversation";
+import { cardComponentFor } from "./cards/registry";
+import type { CardResult } from "./cards/types";
 
 /**
- * The read-only rendering of the conversation (PRD FR-1, FR-12, §7). Pure and
- * presentational — {@link ChatScreen} owns the state, the send round-trip and
- * auto-scroll; this just maps {@link ConversationTurn}s to bubbles.
- *
- * Card turns render as a **placeholder shell** only: a bordered card naming the
- * card type with a `data-card-type` hook. T4–T8 replace {@link CardPlaceholder}
- * with the real card bodies (drop zone, income checkpoint, review summary, …).
+ * The rendering of the conversation (PRD FR-1, FR-12, §7). Mostly presentational
+ * — {@link ChatScreen} owns the state, the send round-trip and auto-scroll — but
+ * a `kind:"card"` turn renders its **registered** interactive body when one
+ * exists (see {@link import("./cards/registry")}), falling back to the
+ * {@link CardPlaceholder} shell for a card type no task has built yet.
  */
 export interface ChatTranscriptProps {
   readonly turns: readonly ConversationTurn[];
+  /** The return whose cards may write back. */
+  readonly returnId: string;
+  /** The revision a card should send with its next write. */
+  readonly revision: number;
+  /** No card may write on a locked (retired-params) return. */
+  readonly readOnly: boolean;
+  /** A card produced a server result — hand it to {@link ChatScreen}. */
+  readonly onCardResult: (result: CardResult) => void;
   /** Show the assistant "thinking" affordance while a send is in flight. */
   readonly typing?: boolean;
 }
@@ -28,9 +40,6 @@ const CARD_LABELS: Record<AssistantCard["type"], string> = {
   "review-summary": "Review your whole return",
   "out-of-scope": "This return can't continue here",
 };
-
-const FIRST_LOAD_TEXT =
-  "Hi — I'll help you put together your 2025–26 return. To start, upload your ATO pre-fill report.";
 
 function Avatar({ who }: { who: "assistant" | "user" }) {
   return (
@@ -132,15 +141,6 @@ function CardPlaceholder({ card }: { card: AssistantCard }) {
   );
 }
 
-function FirstLoadPrompt() {
-  return (
-    <>
-      <AssistantBubble text={FIRST_LOAD_TEXT} />
-      <CardPlaceholder card={{ type: "upload-prefill" }} />
-    </>
-  );
-}
-
 function TypingIndicator() {
   return (
     <AssistantRow>
@@ -159,10 +159,57 @@ function TypingIndicator() {
   );
 }
 
-function TurnView({ turn }: { turn: ConversationTurn }) {
+/** A card turn: its registered interactive body, or the placeholder shell. */
+function CardTurnView({
+  turn,
+  returnId,
+  revision,
+  readOnly,
+  onCardResult,
+}: {
+  turn: AssistantCardTurn;
+  returnId: string;
+  revision: number;
+  readOnly: boolean;
+  onCardResult: (result: CardResult) => void;
+}) {
+  const Card = cardComponentFor(turn.card.type);
+  if (!Card) return <CardPlaceholder card={turn.card} />;
+  return (
+    <AssistantRow>
+      <Card
+        returnId={returnId}
+        revision={revision}
+        turn={turn}
+        readOnly={readOnly}
+        onResult={onCardResult}
+      />
+    </AssistantRow>
+  );
+}
+
+function TurnView({
+  turn,
+  returnId,
+  revision,
+  readOnly,
+  onCardResult,
+}: {
+  turn: ConversationTurn;
+  returnId: string;
+  revision: number;
+  readOnly: boolean;
+  onCardResult: (result: CardResult) => void;
+}) {
   if (turn.role === "assistant") {
     return turn.kind === "card" ? (
-      <CardPlaceholder card={turn.card} />
+      <CardTurnView
+        turn={turn}
+        returnId={returnId}
+        revision={revision}
+        readOnly={readOnly}
+        onCardResult={onCardResult}
+      />
     ) : (
       <AssistantBubble text={turn.text} />
     );
@@ -172,7 +219,14 @@ function TurnView({ turn }: { turn: ConversationTurn }) {
   return <UserBubble text={turn.text} />;
 }
 
-export function ChatTranscript({ turns, typing = false }: ChatTranscriptProps) {
+export function ChatTranscript({
+  turns,
+  returnId,
+  revision,
+  readOnly,
+  onCardResult,
+  typing = false,
+}: ChatTranscriptProps) {
   return (
     <div
       role="log"
@@ -180,11 +234,16 @@ export function ChatTranscript({ turns, typing = false }: ChatTranscriptProps) {
       aria-label="Conversation with the assistant"
       className="flex flex-1 flex-col gap-5 py-6"
     >
-      {turns.length === 0 ? (
-        <FirstLoadPrompt />
-      ) : (
-        turns.map((turn) => <TurnView key={turn.id} turn={turn} />)
-      )}
+      {turns.map((turn) => (
+        <TurnView
+          key={turn.id}
+          turn={turn}
+          returnId={returnId}
+          revision={revision}
+          readOnly={readOnly}
+          onCardResult={onCardResult}
+        />
+      ))}
       {typing ? <TypingIndicator /> : null}
     </div>
   );

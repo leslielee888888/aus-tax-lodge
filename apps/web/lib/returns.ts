@@ -11,8 +11,10 @@ import {
   type SaveReturnResult,
 } from "@aus-tax-lodge/store";
 
-import { type ConversationState, readConversation, withConversation } from "./conversation";
+import { appendTurn, type ConversationState, readConversation, withConversation } from "./conversation";
+import { formatIncomeYear } from "./format";
 import { getServerConfig } from "./server-config";
+import { UPLOAD_PREFILL_HELP } from "./upload-prefill-help";
 
 let cached: ReturnRepository | undefined;
 
@@ -91,6 +93,58 @@ export interface LoadedConversation extends LoadedReturnModel {
 export async function loadConversation(returnId: string): Promise<LoadedConversation> {
   const loaded = await loadReturnModel(returnId);
   return { ...loaded, conversation: readConversation(loaded.model) };
+}
+
+/**
+ * Seed a brand-new return's conversation with the opening upload prompt
+ * (PRD FR-1, T4): an assistant greeting plus the inline `upload-prefill` drop
+ * zone, `phase: "upload"`. Idempotent — only a conversation with **no turns**
+ * is seeded, so a second page load (or a concurrent one) never re-seeds. A
+ * read-only (retired-params) return is returned untouched.
+ *
+ * Wraps {@link loadConversation}; the chat route (`page.tsx`) calls this instead
+ * so {@link import("../components/chat/ChatTranscript").ChatTranscript} always
+ * renders straight from `turns`.
+ */
+export async function loadConversationForChat(returnId: string): Promise<LoadedConversation> {
+  const loaded = await loadConversation(returnId);
+  if (loaded.readOnly || loaded.conversation.turns.length > 0) return loaded;
+
+  const greeting = `Hi — I'll help you put together your ${formatIncomeYear(
+    loaded.envelope.targetYear,
+  )} return. To start, upload your ATO pre-fill report.`;
+
+  let seeded = appendTurn(loaded.conversation, {
+    role: "assistant",
+    kind: "message",
+    text: greeting,
+  });
+  seeded = appendTurn(seeded, {
+    role: "assistant",
+    kind: "card",
+    card: { type: "upload-prefill", payload: { ...UPLOAD_PREFILL_HELP } },
+  });
+  seeded = { ...seeded, phase: "upload" };
+
+  try {
+    const result = await saveConversation(returnId, {
+      model: loaded.model,
+      conversation: seeded,
+      expectedRevision: loaded.envelope.revision,
+    });
+    if (result.conflict) {
+      // Another load seeded it first (or the return changed) — take the stored one.
+      return loadConversation(returnId);
+    }
+    return {
+      ...loaded,
+      conversation: seeded,
+      envelope: { ...loaded.envelope, revision: result.envelope.revision },
+    };
+  } catch (error) {
+    if (error instanceof ConversationReadOnlyError) return loaded;
+    throw error;
+  }
 }
 
 export interface SaveConversationInput {

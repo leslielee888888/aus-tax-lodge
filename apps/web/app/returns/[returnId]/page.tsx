@@ -6,7 +6,7 @@ import { buttonClassName } from "../../../components/Button";
 import { ChatScreen } from "../../../components/chat/ChatScreen";
 import { TopBar } from "../../../components/TopBar";
 import { formatIncomeYear } from "../../../lib/format";
-import { loadConversation } from "../../../lib/returns";
+import { loadConversationForChat } from "../../../lib/returns";
 
 export const metadata: Metadata = { title: "Your return · Return Assistant" };
 
@@ -19,8 +19,8 @@ export const dynamic = "force-dynamic";
  * {@link ChatScreen} renders the transcript + composer. A retired-params return
  * (read-only) shows the transcript with a "locked" note instead of a composer.
  *
- * T4 makes the first-load upload prompt a real drop zone and seeds the opening
- * turns; T5–T8 fill in the placeholder card shells.
+ * A fresh return is seeded with the opening upload prompt + inline drop zone by
+ * {@link loadConversationForChat} (T4); T5–T8 fill in the remaining card shells.
  */
 export default async function ReturnChatPage({
   params,
@@ -29,9 +29,9 @@ export default async function ReturnChatPage({
 }) {
   const { returnId } = await params;
 
-  let loaded: Awaited<ReturnType<typeof loadConversation>>;
+  let loaded: Awaited<ReturnType<typeof loadConversationForChat>>;
   try {
-    loaded = await loadConversation(returnId);
+    loaded = await loadConversationForChat(returnId);
   } catch {
     notFound();
   }
