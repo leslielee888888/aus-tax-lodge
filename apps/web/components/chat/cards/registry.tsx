@@ -1,4 +1,6 @@
 import type { CardRef } from "../../../lib/conversation";
+import { ConfirmFigureCard } from "./ConfirmFigureCard";
+import { IncomeCheckpointCard } from "./IncomeCheckpointCard";
 import type { CardComponent, CardComponentMap } from "./types";
 import { UploadPrefillCard } from "./UploadPrefillCard";
 
@@ -9,6 +11,8 @@ import { UploadPrefillCard } from "./UploadPrefillCard";
  */
 export const CARD_COMPONENTS: CardComponentMap = {
   "upload-prefill": UploadPrefillCard,
+  "income-checkpoint": IncomeCheckpointCard,
+  "confirm-figure": ConfirmFigureCard,
 };
 
 export function cardComponentFor(type: CardRef): CardComponent | undefined {
