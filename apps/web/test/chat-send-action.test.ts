@@ -10,8 +10,11 @@ const { loadConversation, saveConversation, applyUserTurn, nextTurn } = vi.hoist
 vi.mock("../lib/returns", () => ({
   loadConversation,
   saveConversation,
+  getReturnRepository: () => ({ deleteReturn: vi.fn() }),
   ConversationReadOnlyError: class ConversationReadOnlyError extends Error {},
 }));
+
+vi.mock("next/navigation", () => ({ redirect: vi.fn() }));
 
 vi.mock("../lib/ai/client", () => ({ getClaudeClient: () => ({ ask: vi.fn() }) }));
 

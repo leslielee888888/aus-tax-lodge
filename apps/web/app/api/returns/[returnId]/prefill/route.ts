@@ -18,6 +18,7 @@ import {
   loadConversation,
   saveConversation,
 } from "../../../../../lib/returns";
+import { checkModelInScope } from "../../../../../lib/scope-check";
 import { getDocumentStore } from "../../../../../lib/store";
 
 export const runtime = "nodejs";
@@ -35,9 +36,14 @@ interface RouteContext {
  * - **not an `ato-prefill-report`** → no extraction; the assistant asks for the
  *   right file, `phase` stays `upload`. `{ ok:false, reason:"wrong-type" }`.
  * - **a pre-fill report** → vision extraction (`@aus-tax-lodge/extraction`,
- *   PRD Q3) seeds the model, the assistant summarises what it read **from the
- *   model** (`summariseIncomeFound`), `phase` → `interview`, and `nextTurn`
- *   (T2) opens the interview. `{ ok:true }`.
+ *   PRD Q3) seeds the model. The seeded model + the uploaded document(s) then go
+ *   through the out-of-scope gate (`checkModelInScope`, PRD FR-8/FR-20). If it
+ *   finds nothing, the assistant summarises what it read **from the model**
+ *   (`summariseIncomeFound`), `phase` → `interview`, and `nextTurn` (T2) opens
+ *   the interview. `{ ok:true }`.
+ * - **out of scope** → the interview does not open: an `out-of-scope` card turn
+ *   is appended, `phase` → `stopped`, and the **loaded (pre-extraction) model**
+ *   is persisted, not the seeded one (PRD FR-9). `{ ok:false, reason:"out-of-scope" }`.
  * - **extraction / Claude throws** → the assistant says it couldn't read the
  *   file, `phase` stays `upload`. `{ ok:false, reason:"unreadable" }`. (T10
  *   hardens the failure path; here it just must not crash or advance.)
@@ -109,10 +115,32 @@ export async function POST(request: Request, { params }: RouteContext): Promise<
     return json({ ...result, ok: false, reason: "wrong-type" as const }, 200);
   }
 
-  // --- A pre-fill report: extract, seed, open the interview ----------------
+  // --- A pre-fill report: extract, seed, scope-check, open the interview ---
   try {
     const extraction = await extractDocument(returnId, doc.docId, { store, client });
-    const { model: seeded, pendingReconciliation } = applyExtractions(model, [extraction]);
+    const { model: seededBase, pendingReconciliation } = applyExtractions(model, [extraction]);
+
+    // Out-of-scope gate on the seeded model + the uploaded document(s)
+    // (PRD FR-8 "on every ... document", FR-20). Deterministic — Claude never
+    // raises the stop. `seeded` carries the refreshed document content-cache.
+    const { findings, model: seeded } = await checkModelInScope({
+      returnId,
+      model: seededBase,
+      store,
+      visionClient: client,
+    });
+
+    if (findings.length > 0) {
+      let stopped = appendTurn(withFile, {
+        role: "assistant",
+        kind: "card",
+        card: { type: "out-of-scope", payload: { findings } },
+      });
+      stopped = { ...stopped, phase: "stopped", stoppedReason: findings[0]!.item };
+      // FR-9: the out-of-scope extraction is NOT persisted — save the loaded model.
+      const result = await save(stopped, model);
+      return json({ ...result, ok: false, reason: "out-of-scope" as const }, 200);
+    }
 
     const scratch = readExtractionScratch(model);
     const seededWithScratch = withExtractionScratch(seeded, {
