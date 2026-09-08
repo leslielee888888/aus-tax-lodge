@@ -31,11 +31,11 @@ describe("resolveNewReturn", () => {
     // User accepts.
     await recordAcknowledgementAt(dir);
 
-    // Second return: acknowledgement present -> straight to creating it.
+    // Second return: acknowledgement present -> straight into the chat (no wizard).
     expect(await resolveNewReturn(deps)).toEqual({
       kind: "redirect",
-      href: "/returns/ret123/details",
+      href: "/returns/ret123",
     });
-    expect(createReturn).toHaveBeenCalledExactlyOnceWith({ currentStep: "details" });
+    expect(createReturn).toHaveBeenCalledExactlyOnceWith({ currentStep: "chat" });
   });
 });

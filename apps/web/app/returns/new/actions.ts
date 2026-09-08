@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 
 import { recordAcknowledgement } from "../../../lib/acknowledgement";
-import { FIRST_STEP } from "../../../lib/new-return";
+import { NEW_RETURN_STEP } from "../../../lib/new-return";
 import { getReturnRepository } from "../../../lib/returns";
 
 export interface StartReturnState {
@@ -12,8 +12,9 @@ export interface StartReturnState {
 
 /**
  * First-run acknowledgement (PRD FR-19): record the "not tax advice / I'm
- * responsible" acceptance with a timestamp, create the first return, and go to
- * its first step. The checkbox must be ticked.
+ * responsible" acceptance with a timestamp, create the first return, and drop
+ * the user into its chat (PRD FR-1 — v2 has no wizard). The checkbox must be
+ * ticked.
  */
 export async function startFirstReturn(
   _previous: StartReturnState,
@@ -24,6 +25,6 @@ export async function startFirstReturn(
   }
 
   await recordAcknowledgement();
-  const envelope = await getReturnRepository().createReturn({ currentStep: FIRST_STEP });
-  redirect(`/returns/${envelope.returnId}/${FIRST_STEP}`);
+  const envelope = await getReturnRepository().createReturn({ currentStep: NEW_RETURN_STEP });
+  redirect(`/returns/${envelope.returnId}`);
 }

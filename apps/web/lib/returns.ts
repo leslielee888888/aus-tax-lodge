@@ -8,10 +8,19 @@ import {
   type LoadReturnResult,
   type ReturnRepository,
   type ReturnStatus,
+  type ReturnSummary,
   type SaveReturnResult,
 } from "@aus-tax-lodge/store";
 
-import { appendTurn, type ConversationState, readConversation, withConversation } from "./conversation";
+import {
+  appendTurn,
+  type ConversationPhase,
+  type ConversationState,
+  conversationSummaryLine,
+  emptyConversation,
+  readConversation,
+  withConversation,
+} from "./conversation";
 import { formatIncomeYear } from "./format";
 import { getServerConfig } from "./server-config";
 import { UPLOAD_PREFILL_HELP } from "./upload-prefill-help";
@@ -175,4 +184,53 @@ export async function saveConversation(
     status: input.status,
     expectedRevision: input.expectedRevision,
   });
+}
+
+/**
+ * A returns-list row (PRD FR-13 / T9): the store's lightweight
+ * {@link ReturnSummary} plus the bits that only live in the conversation state —
+ * the interview phase, the one-line "up to: <topic>" status
+ * ({@link conversationSummaryLine}), and the out-of-scope `stoppedReason`.
+ */
+export interface ReturnListItem {
+  readonly summary: ReturnSummary;
+  readonly phase: ConversationPhase;
+  /** The "up to: <topic>" / phase-specific line for the list. */
+  readonly summaryLine: string;
+  /** The out-of-scope item that hard-stopped the interview (PRD FR-9), or `null`. */
+  readonly stoppedReason: string | null;
+}
+
+/**
+ * {@link ReturnRepository.listReturns} enriched with each return's conversation
+ * state (option (a) in T9's brief). `ReturnSummary` deliberately does not carry
+ * the transcript, so this loads each return's envelope and reads the
+ * {@link ConversationState} off it — N small decrypts for a single-user local
+ * tool, which the home page already tolerates (it runs a purge sweep + a list on
+ * every request, and is `dynamic = "force-dynamic"`).
+ *
+ * A return whose envelope can't be read, or predates the conversation state, is
+ * still listed — it reads as a fresh {@link emptyConversation} (`phase: "upload"`).
+ */
+export async function listReturnsWithConversation(
+  repository: ReturnRepository = getReturnRepository(),
+): Promise<ReturnListItem[]> {
+  const summaries = await repository.listReturns();
+  return Promise.all(
+    summaries.map(async (summary): Promise<ReturnListItem> => {
+      let conversation = emptyConversation();
+      try {
+        const { envelope } = await repository.loadReturn(summary.returnId);
+        conversation = readConversation(isReturnModel(envelope.data) ? envelope.data : null);
+      } catch (error) {
+        console.error(`returns list: could not read conversation for ${summary.returnId}`, error);
+      }
+      return {
+        summary,
+        phase: conversation.phase,
+        summaryLine: conversationSummaryLine(conversation),
+        stoppedReason: conversation.stoppedReason,
+      };
+    }),
+  );
 }
