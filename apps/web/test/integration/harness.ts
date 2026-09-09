@@ -23,11 +23,9 @@ import { inflateRawSync } from "node:zlib";
 import { PDFDocument, StandardFonts } from "pdf-lib";
 import type { AskOptions, ClaudeClient } from "@aus-tax-lodge/ai";
 import {
-  answer,
   createEmptyReturnModel,
   markNotApplicable,
   RENTAL_EXPENSE_KEYS,
-  unsetField,
   type ReturnModel,
 } from "@aus-tax-lodge/model";
 
@@ -358,88 +356,21 @@ export async function postInterviewDocument(
 // ---------------------------------------------------------------------------
 
 /**
- * The return model as it stands the moment the chat opens.
+ * The return model as it stands the moment the chat opens — exactly what
+ * `app/returns/new` produces, `createEmptyReturnModel` untouched.
  *
- * The v2 conversation owns everything from here — income confirmation, deduction
- * amounts, the FR-6 facts, the rental, review and approval. But two categories
- * of `collectInScopeFields` field have **no capture path in v2** and are seeded
- * here, exactly as the v1 T23 integration harness's `detailsModel()` seeded them
- * (they were the deleted six-step wizard's `details` step's job — see the T12
- * report):
- *
- *  1. the taxpayer identity block (`taxpayer.*`);
- *  2. the deduction substantiation metadata the interview allow-list has no path
- *     for (`deductions.workRelatedCar.ratePerKm` / `.substantiationRef` /
- *     `.businessKilometres`, every `deductions.*.substantiationRef`,
- *     `deductions.workFromHome.ratePerHour` / `.substantiationRef`);
- *  3. the rental property identity block (`rental.property.*`) — only checked
- *     once `rental.present`, so harmless on a non-rental return; the deleted
- *     wizard's `applyRentalIdentity` set it (v1 harness `settleRentalWiringGap`
- *     precedent).
- *
- * The interview still sets every deduction `.amount`, `workFromHome.hours`, the
- * income figures, private health, the FR-6 facts and the rental scope gate for
- * real.
+ * Before #88 / T15, this seeded three categories of `collectInScopeFields`
+ * field that the v2 interview had **no capture path** for at all (the
+ * taxpayer identity block, the deduction substantiation / rate metadata, the
+ * rental property identity) — which is exactly the blocker #88 reported: a
+ * return created empty could never actually reach `deterministicallyComplete`.
+ * T15 closed every one of those gaps in the interview allow-list
+ * (`lib/interview/fields.ts`) and the secure `identity` card, so this harness
+ * no longer needs to pre-seed anything — the scripted conversations below
+ * drive every field, including these, through the real chat.
  */
 export function baseReturnModel(): ReturnModel {
-  const m = createEmptyReturnModel("2025-26");
-  const nilN = () => answer(unsetField<number>(), null);
-  const nilS = () => answer(unsetField<string>(), null);
-  return {
-    ...m,
-    rental: {
-      ...m.rental,
-      property: {
-        ...m.rental.property,
-        addressLine1: answer(unsetField<string>(), "10 Landlord Lane"),
-        suburb: answer(unsetField<string>(), "Brunswick"),
-        state: answer(unsetField<string>(), "VIC"),
-        postcode: answer(unsetField<string>(), "3056"),
-        firstEarnedIncomeOn: answer(unsetField<string>(), "2019-07-01"),
-      },
-    },
-    taxpayer: {
-      fullName: answer(unsetField<string>(), "Priya Example"),
-      dateOfBirth: answer(unsetField<string>(), "1985-03-02"),
-      postalAddress: answer(unsetField(), {
-        line1: "1 Test St",
-        line2: "",
-        suburb: "Sydney",
-        state: "NSW",
-        postcode: "2000",
-        country: "Australia",
-      }),
-      taxFileNumber: answer(unsetField<string>(), "123456782"),
-      refundAccount: answer(unsetField(), {
-        bsb: "062-000",
-        accountNumber: "12345678",
-        accountName: "Priya Example",
-      }),
-    },
-    deductions: {
-      ...m.deductions,
-      workRelatedCar: {
-        ...m.deductions.workRelatedCar,
-        businessKilometres: nilN(),
-        ratePerKm: nilN(),
-        substantiationRef: nilS(),
-      },
-      workRelatedTravel: { ...m.deductions.workRelatedTravel, substantiationRef: nilS() },
-      workRelatedClothing: { ...m.deductions.workRelatedClothing, substantiationRef: nilS() },
-      selfEducation: { ...m.deductions.selfEducation, substantiationRef: nilS() },
-      otherWorkRelated: { ...m.deductions.otherWorkRelated, substantiationRef: nilS() },
-      giftsAndDonations: { ...m.deductions.giftsAndDonations, substantiationRef: nilS() },
-      costOfManagingTaxAffairs: {
-        ...m.deductions.costOfManagingTaxAffairs,
-        substantiationRef: nilS(),
-      },
-      workFromHome: {
-        ...m.deductions.workFromHome,
-        ratePerHour: nilN(),
-        substantiationRef: nilS(),
-      },
-    },
-  };
+  return createEmptyReturnModel("2025-26");
 }
 
 // ---------------------------------------------------------------------------
@@ -490,6 +421,25 @@ export async function confirmIncomeCheckpoint(returnId: string) {
   const { confirmIncome } = await actions();
   const loaded = await load(returnId);
   return confirmIncome(returnId, loaded.envelope.revision, lastCardId(loaded.conversation));
+}
+
+/**
+ * `provideIdentity` on the latest `identity` card (PRD FR-1, FR-17, #88 / T15)
+ * — the TFN + refund bank account, submitted through the secure card rather
+ * than typed in chat.
+ */
+export async function submitIdentity(
+  returnId: string,
+  values: { tfn: string; bsb: string; accountNumber: string; accountName: string },
+) {
+  const { provideIdentity } = await actions();
+  const loaded = await load(returnId);
+  return provideIdentity(
+    returnId,
+    loaded.envelope.revision,
+    lastCardId(loaded.conversation),
+    values,
+  );
 }
 
 /** Resolve every still-unresolved `pendingConfirmation` by accepting it (PRD FR-5 "Yes"). */

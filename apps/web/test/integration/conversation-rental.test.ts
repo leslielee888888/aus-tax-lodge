@@ -60,6 +60,8 @@ import { buildReturnJson } from "@aus-tax-lodge/export";
 import { isExportBlocked, validateReturn } from "@aus-tax-lodge/validation";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
+import { deterministicallyComplete } from "../../lib/interview";
+
 const holder = vi.hoisted(() => ({ client: null as unknown }));
 vi.mock("../../lib/ai/client", () => ({
   getClaudeClient: () => {
@@ -82,6 +84,7 @@ import {
   send,
   settleRentalGaps,
   setupTestEnv,
+  submitIdentity,
   type ClaudeScript,
   type TestEnv,
 } from "./harness";
@@ -180,7 +183,8 @@ describe("Scenario 2 — negatively-geared rental", () => {
       "REPAIRS-CONFIRM: yes, that plumbing repair was a genuine repair, not an improvement.",
     );
 
-    // --- The rental scope gate, answered in scope (PRD FR-6, FR-24) ---
+    // --- The rental scope gate, answered in scope (PRD FR-6, FR-24) ---, plus
+    // the rental property identity (PRD FR-24, #88 / T15), asked in the same turn.
     script.onAsk(
       "answer:scope-gate",
       (p, o) => isApplyTurn(p, o) && p.includes("RENTAL-SCOPE:"),
@@ -198,28 +202,47 @@ describe("Scenario 2 — negatively-geared rental", () => {
             value: true,
             kind: "boolean",
           },
+          { path: "rental.property.addressLine1", value: "10 Landlord Lane", kind: "string" },
+          { path: "rental.property.suburb", value: "Brunswick", kind: "string" },
+          { path: "rental.property.state", value: "VIC", kind: "string" },
+          { path: "rental.property.postcode", value: "3056", kind: "string" },
+          {
+            path: "rental.property.firstEarnedIncomeOn",
+            value: "2019-07-01",
+            kind: "date",
+          },
         ],
       }),
     );
     await send(
       returnId,
-      "RENTAL-SCOPE: I own it on my own, it was rented all year, no private use, and I did not buy or sell it this year.",
+      "RENTAL-SCOPE: I own it on my own, it was rented all year, no private use, and I did not buy " +
+        "or sell it this year. It's at 10 Landlord Lane, Brunswick VIC 3056, and it first earned " +
+        "rental income on 1 July 2019.",
     );
 
     // --- Nil the untouched rental expense rows (v1 review-screen action) ---
     await settleRentalGaps(returnId);
 
-    // --- The FR-6 facts (HELP loan held this time) --------------------
+    // --- Taxpayer identity + the FR-6 facts (HELP loan held this time) (#88 / T15) ---
     const factUpdates = [
-      { path: "deductions.workRelatedCar.amount", value: null, kind: "number" },
-      { path: "deductions.workRelatedTravel.amount", value: null, kind: "number" },
-      { path: "deductions.workRelatedClothing.amount", value: null, kind: "number" },
-      { path: "deductions.selfEducation.amount", value: null, kind: "number" },
-      { path: "deductions.otherWorkRelated.amount", value: null, kind: "number" },
-      { path: "deductions.workFromHome.amount", value: null, kind: "number" },
-      { path: "deductions.workFromHome.hours", value: null, kind: "number" },
-      { path: "deductions.giftsAndDonations.amount", value: null, kind: "number" },
-      { path: "deductions.costOfManagingTaxAffairs.amount", value: null, kind: "number" },
+      // Taxpayer identity (PRD FR-1, #88 / T15) — name / DOB / postal address only;
+      // the TFN + refund account are NEVER part of a chat reply (PRD FR-17).
+      { path: "taxpayer.fullName", value: "Jordan Landlord", kind: "string" },
+      { path: "taxpayer.dateOfBirth", value: "1978-11-20", kind: "date" },
+      { path: "taxpayer.postalAddress.line1", value: "5 Owner Ave", kind: "string" },
+      { path: "taxpayer.postalAddress.suburb", value: "Fitzroy", kind: "string" },
+      { path: "taxpayer.postalAddress.state", value: "VIC", kind: "string" },
+      { path: "taxpayer.postalAddress.postcode", value: "3065", kind: "string" },
+      // No work-related deductions claimed at all (#88 / T15).
+      { path: "deductions.workRelatedCar.notClaimed", value: true, kind: "boolean" },
+      { path: "deductions.workRelatedTravel.notClaimed", value: true, kind: "boolean" },
+      { path: "deductions.workRelatedClothing.notClaimed", value: true, kind: "boolean" },
+      { path: "deductions.selfEducation.notClaimed", value: true, kind: "boolean" },
+      { path: "deductions.otherWorkRelated.notClaimed", value: true, kind: "boolean" },
+      { path: "deductions.workFromHome.notClaimed", value: true, kind: "boolean" },
+      { path: "deductions.giftsAndDonations.notClaimed", value: true, kind: "boolean" },
+      { path: "deductions.costOfManagingTaxAffairs.notClaimed", value: true, kind: "boolean" },
       { path: "questionnaire.residencyFullYear", value: true, kind: "boolean" },
       { path: "context.spouse.status", value: "none", kind: "string" },
       { path: "context.holdsStudyLoan", value: true, kind: "boolean" },
@@ -244,10 +267,38 @@ describe("Scenario 2 — negatively-geared rental", () => {
     );
     await send(
       returnId,
-      "DEDUCTIONS+FACTS: no deductions to claim. Resident all year, no spouse, I DO have a HELP loan, " +
+      "DEDUCTIONS+FACTS: I'm Jordan Landlord, born 20/11/1978, at 5 Owner Ave, Fitzroy VIC 3065. " +
+        "No deductions to claim. Resident all year, no spouse, I DO have a HELP loan, " +
         "no private hospital cover, no dependent children, the CommBank account is 100% mine, WFH hours " +
         "not double-claimed, and no government payments / fringe benefits / reportable employer super.",
     );
+
+    // The plain identity questions are settled, so the secure `identity` card is
+    // raised deterministically (PRD FR-1, FR-17, #88 / T15) before review.
+    let afterFacts = await load(returnId);
+    const identityCard = afterFacts.conversation.turns.at(-1)!;
+    expect(identityCard).toMatchObject({
+      role: "assistant",
+      kind: "card",
+      card: { type: "identity" },
+    });
+    expect(afterFacts.conversation.phase).toBe("interview");
+
+    // --- Submit the TFN + refund account via the secure card -----------
+    const identityResult = await submitIdentity(returnId, {
+      tfn: "123456782",
+      bsb: "062-000",
+      accountNumber: "87654321",
+      accountName: "Jordan Landlord",
+    });
+    expect(identityResult.error).toBeUndefined();
+    // PRD FR-17 — the card-response turn carries only a flag, never the values.
+    const identityResponseTurn = identityResult.conversation.turns.find(
+      (t) => t.kind === "card-response" && t.cardId === identityCard.id,
+    );
+    expect(identityResponseTurn).toMatchObject({ response: { provided: true } });
+    expect(JSON.stringify(identityResponseTurn)).not.toContain("123456782");
+    expect(JSON.stringify(identityResponseTurn)).not.toContain("87654321");
 
     // --- The interview is complete → review ---------------------------
     const reviewed = await load(returnId);
@@ -255,6 +306,10 @@ describe("Scenario 2 — negatively-geared rental", () => {
     const model = reviewed.model;
     expect(model.rental.netRentalResult.value).toBe(EXPECTED_NET_RENTAL);
     expect(isExportBlocked(validateReturn(model))).toBe(false);
+
+    // --- #88 / T15 — the empty-seeded return is now genuinely complete -------
+    expect(deterministicallyComplete(model)).toBe(true);
+    expect(validateReturn(model).filter((i) => i.severity === "error")).toEqual([]);
 
     // --- The engine: the loss lowers taxable income; the income tests add it back
     const engineInput = toEngineInput(model);

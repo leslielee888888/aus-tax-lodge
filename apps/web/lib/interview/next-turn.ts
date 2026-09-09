@@ -9,7 +9,7 @@
  * `ask` about the first outstanding thing — the deterministic gate decides
  * completeness, not Claude (PRD FR-3).
  */
-import { isReadyForEstimate, type ReturnModel } from "@aus-tax-lodge/model";
+import { isReadyForEstimate, isSettled, type ReturnModel } from "@aus-tax-lodge/model";
 import { validateReturn } from "@aus-tax-lodge/validation";
 
 import type { CardRef, ConversationState } from "../conversation";
@@ -65,6 +65,17 @@ export async function nextTurn(input: NextTurnInput): Promise<InterviewStep> {
     return { kind: "card", card: "reconcile" };
   }
 
+  // Deterministic short-circuit (PRD FR-1, FR-17, #88 / T15): once the plain
+  // identity questions (name / DOB / postal address) are settled, raise the
+  // secure `identity` card for the TFN + refund bank account — deterministically,
+  // never via Claude's own JSON, so those two fields are never asked for in
+  // chat (which would land the TFN in a `ConversationTurn.text` and later be
+  // replayed into a prompt). Re-raised every turn until both are settled,
+  // exactly like the `reconcile` card above.
+  if (identityCardOutstanding(model)) {
+    return { kind: "card", card: "identity" };
+  }
+
   const raw = await client.ask(buildNextTurnPrompt(model, conversation), {
     system: NEXT_TURN_SYSTEM,
     maxTokens: NEXT_TURN_MAX_TOKENS,
@@ -81,6 +92,20 @@ export async function nextTurn(input: NextTurnInput): Promise<InterviewStep> {
 export function deterministicallyComplete(model: ReturnModel): boolean {
   if (!isReadyForEstimate(model)) return false;
   return !validateReturn(model).some((issue) => issue.severity === "error");
+}
+
+/**
+ * `true` once the plain identity questions are answered but the TFN / refund
+ * account are not — the moment the secure `identity` card should appear
+ * (PRD FR-1, FR-17, #88 / T15). Gating on name/DOB/address first means the
+ * card shows up naturally, right after the ordinary identity questions, not
+ * before them or scattered mid-interview.
+ */
+export function identityCardOutstanding(model: ReturnModel): boolean {
+  const t = model.taxpayer;
+  const basicsSettled =
+    isSettled(t.fullName) && isSettled(t.dateOfBirth) && isSettled(t.postalAddress);
+  return basicsSettled && (!isSettled(t.taxFileNumber) || !isSettled(t.refundAccount));
 }
 
 function parseStep(obj: Record<string, unknown>): InterviewStep {

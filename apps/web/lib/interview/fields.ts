@@ -24,6 +24,8 @@ import {
   propose,
   reclassifyRepairsAsCapital,
   recomputeNetRentalResult,
+  type PostalAddress,
+  type Provenanced,
   type RentalScopeGateAnswer,
   type ReturnModel,
   type SpouseStatus,
@@ -60,6 +62,19 @@ const DEDUCTION_AMOUNT_KEYS = [
 
 /** Fixed (non-array) paths → the value kind they expect. */
 const FIXED_PATH_KIND: Readonly<Record<string, FieldUpdateKind>> = {
+  // Taxpayer identity (PRD FR-1) — name, DOB and postal address are plain
+  // interview questions. The TFN and refund bank account are deliberately
+  // ABSENT from this allow-list: they are collected only through the
+  // `identity` secure card (`provideIdentity`), never typed into the
+  // composer, so they can never land in a `ConversationTurn.text` and be
+  // replayed into a later prompt (PRD FR-17 "TFN never in a prompt").
+  "taxpayer.fullName": "string",
+  "taxpayer.dateOfBirth": "date",
+  "taxpayer.postalAddress.line1": "string",
+  "taxpayer.postalAddress.line2": "string",
+  "taxpayer.postalAddress.suburb": "string",
+  "taxpayer.postalAddress.state": "string",
+  "taxpayer.postalAddress.postcode": "string",
   // Income scalars beyond the pre-fill
   "income.governmentAllowances": "number",
   "income.reportableFringeBenefits": "number",
@@ -68,8 +83,32 @@ const FIXED_PATH_KIND: Readonly<Record<string, FieldUpdateKind>> = {
   ...Object.fromEntries(
     DEDUCTION_AMOUNT_KEYS.map((k) => [`deductions.${k}.amount`, "number"] as const),
   ),
+  // "Not claiming this category at all" (#88 / T15) — settles amount +
+  // substantiation (+ the car/WFH rate inputs) nil in one shot.
+  ...Object.fromEntries(
+    DEDUCTION_AMOUNT_KEYS.map((k) => [`deductions.${k}.notClaimed`, "boolean"] as const),
+  ),
+  // "Do you hold records for this claim?" (#88 / T15) — settles substantiationRef.
+  ...Object.fromEntries(
+    DEDUCTION_AMOUNT_KEYS.map((k) => [`deductions.${k}.recordsHeld`, "boolean"] as const),
+  ),
   "deductions.workRelatedCar.businessKilometres": "number",
+  // No statutory cents-per-km constant is exported by `@aus-tax-lodge/model` or
+  // `@aus-tax-lodge/params` (T15 searched both — see the T15 report). Per the
+  // task brief this is a real package gap, not something to hardcode in
+  // `apps/web`: the rate is therefore captured as the user's own stated figure
+  // (the ATO's published cents-per-km rate for the year), like `businessKilometres`,
+  // rather than auto-filled from a constant that does not exist yet.
+  "deductions.workRelatedCar.ratePerKm": "number",
   "deductions.workFromHome.hours": "number",
+  // Same statutory-constant gap as `ratePerKm` above — captured as a stated fact.
+  "deductions.workFromHome.ratePerHour": "number",
+  // Rental property identity (PRD FR-24) — only asked once `rental.present`.
+  "rental.property.addressLine1": "string",
+  "rental.property.suburb": "string",
+  "rental.property.state": "string",
+  "rental.property.postcode": "string",
+  "rental.property.firstEarnedIncomeOn": "date",
   // FR-6 facts
   "questionnaire.residencyFullYear": "boolean",
   "questionnaire.studyLoanHeld": "boolean",
@@ -134,6 +173,20 @@ const RENTAL_LINE_RE = /^rental\.expenses\.([a-zA-Z]+)\.amount$/;
 const INTEREST_ACCOUNT_RE =
   /^income\.interestAccounts\.([^.]+)\.(grossInterest|ownershipSharePercent)$/;
 const DIVIDEND_RE = /^income\.dividends\.([^.]+)\.(unfranked|franked|frankingCredits)$/;
+
+/** The five `taxpayer.postalAddress.*` sub-answers, merged onto one `Provenanced<PostalAddress>`. */
+const TAXPAYER_ADDRESS_RE = /^taxpayer\.postalAddress\.(line1|line2|suburb|state|postcode)$/;
+
+type DeductionAmountKey = (typeof DEDUCTION_AMOUNT_KEYS)[number];
+
+function isDeductionAmountKey(key: string): key is DeductionAmountKey {
+  return (DEDUCTION_AMOUNT_KEYS as readonly string[]).includes(key);
+}
+
+/** "Not claiming this category" (#88 / T15) — settles the whole category nil. */
+const DEDUCTION_NOT_CLAIMED_RE = /^deductions\.([a-zA-Z]+)\.notClaimed$/;
+/** "Do you hold records for this claim?" (#88 / T15) — settles `substantiationRef`. */
+const DEDUCTION_RECORDS_HELD_RE = /^deductions\.([a-zA-Z]+)\.recordsHeld$/;
 
 /** Every allowed path, for the prompt's own reference and for tests. */
 export const INTERVIEW_FIELD_PATHS: readonly string[] = [
@@ -266,8 +319,81 @@ export function applyInterviewField(model: ReturnModel, update: FieldUpdate): Re
   if (gateMatch) {
     return applyRentalScopeGate(model, gateMatch[1] as RentalScopeGateKey, value as boolean | null);
   }
+  const addressMatch = TAXPAYER_ADDRESS_RE.exec(path);
+  if (addressMatch) {
+    const key = addressMatch[1] as keyof PostalAddress;
+    return applyTaxpayerAddressPart(model, key, value as string | null);
+  }
+  const notClaimedMatch = DEDUCTION_NOT_CLAIMED_RE.exec(path);
+  if (notClaimedMatch) {
+    const key = notClaimedMatch[1]!;
+    if (!isDeductionAmountKey(key)) {
+      throw new InterviewFieldError(`"${key}" is not a known deduction category`, path);
+    }
+    return applyDeductionNotClaimed(model, key, value as boolean | null);
+  }
+  const recordsHeldMatch = DEDUCTION_RECORDS_HELD_RE.exec(path);
+  if (recordsHeldMatch) {
+    const key = recordsHeldMatch[1]!;
+    if (!isDeductionAmountKey(key)) {
+      throw new InterviewFieldError(`"${key}" is not a known deduction category`, path);
+    }
+    return applyDeductionRecordsHeld(model, key, value as boolean | null);
+  }
 
   switch (path) {
+    // --- Taxpayer identity (PRD FR-1) --------------------------------------
+    case "taxpayer.fullName":
+      return {
+        ...model,
+        taxpayer: {
+          ...model.taxpayer,
+          fullName: answer(model.taxpayer.fullName, value as string | null),
+        },
+      };
+    case "taxpayer.dateOfBirth":
+      return {
+        ...model,
+        taxpayer: {
+          ...model.taxpayer,
+          dateOfBirth: answer(model.taxpayer.dateOfBirth, value as string | null),
+        },
+      };
+
+    // --- Rental property identity (PRD FR-24) ------------------------------
+    case "rental.property.addressLine1":
+    case "rental.property.suburb":
+    case "rental.property.state":
+    case "rental.property.postcode": {
+      const field = path.split(".")[2] as "addressLine1" | "suburb" | "state" | "postcode";
+      return {
+        ...model,
+        rental: {
+          ...model.rental,
+          present: true,
+          property: {
+            ...model.rental.property,
+            [field]: answer(model.rental.property[field], value as string | null),
+          },
+        },
+      };
+    }
+    case "rental.property.firstEarnedIncomeOn":
+      return {
+        ...model,
+        rental: {
+          ...model.rental,
+          present: true,
+          property: {
+            ...model.rental.property,
+            firstEarnedIncomeOn: answer(
+              model.rental.property.firstEarnedIncomeOn,
+              value as string | null,
+            ),
+          },
+        },
+      };
+
     // --- Income scalars ---------------------------------------------------
     case "income.governmentAllowances":
     case "income.reportableFringeBenefits":
@@ -289,12 +415,28 @@ export function applyInterviewField(model: ReturnModel, update: FieldUpdate): Re
           businessKilometres: answer(d.workRelatedCar.businessKilometres, value as number | null),
         },
       }));
+    case "deductions.workRelatedCar.ratePerKm":
+      return withDeductions(model, (d) => ({
+        ...d,
+        workRelatedCar: {
+          ...d.workRelatedCar,
+          ratePerKm: answer(d.workRelatedCar.ratePerKm, value as number | null),
+        },
+      }));
     case "deductions.workFromHome.hours":
       return withDeductions(model, (d) => ({
         ...d,
         workFromHome: {
           ...d.workFromHome,
           hours: answer(d.workFromHome.hours, value as number | null),
+        },
+      }));
+    case "deductions.workFromHome.ratePerHour":
+      return withDeductions(model, (d) => ({
+        ...d,
+        workFromHome: {
+          ...d.workFromHome,
+          ratePerHour: answer(d.workFromHome.ratePerHour, value as number | null),
         },
       }));
 
@@ -603,4 +745,131 @@ function applyRentalScopeGate(
     rental,
     questionnaire: { ...model.questionnaire, rentalScopeGate: gateField },
   };
+}
+
+// ---------------------------------------------------------------------------
+// Taxpayer identity (PRD FR-1, #88 / T15)
+// ---------------------------------------------------------------------------
+
+/**
+ * Merge one `taxpayer.postalAddress.*` sub-answer (PRD FR-1) onto the single
+ * `Provenanced<PostalAddress>` field, following the same partial-object
+ * pattern as {@link applyRentalScopeGate}: `propose`d (unsettled) while a
+ * required part (`line1`/`suburb`/`state`/`postcode`) is still missing,
+ * `answer`ed (the user's own fact) once all four are in. `line2` is optional
+ * and defaults to `""`. `country` is always `"Australia"` — this return is
+ * only ever in scope for an Australian resident.
+ */
+function applyTaxpayerAddressPart(
+  model: ReturnModel,
+  key: keyof PostalAddress,
+  value: string | null,
+): ReturnModel {
+  const field = model.taxpayer.postalAddress;
+  const existing = (field.value as Partial<PostalAddress> | null) ?? {};
+  const partial: Partial<PostalAddress> = { ...existing, [key]: value ?? "" };
+
+  const required: (keyof PostalAddress)[] = ["line1", "suburb", "state", "postcode"];
+  const complete = required.every((k) => typeof partial[k] === "string" && partial[k] !== "");
+  const draft: PostalAddress = {
+    line1: partial.line1 ?? "",
+    line2: partial.line2 ?? "",
+    suburb: partial.suburb ?? "",
+    state: partial.state ?? "",
+    postcode: partial.postcode ?? "",
+    country: "Australia",
+  };
+
+  const postalAddress: Provenanced<PostalAddress> = complete
+    ? answer(field, draft)
+    : propose(field, draft, computedOrigin("postal address — answered in the interview"));
+
+  return { ...model, taxpayer: { ...model.taxpayer, postalAddress } };
+}
+
+// ---------------------------------------------------------------------------
+// Deductions — "not claiming" / "records held" (PRD FR-5, #88 / T15)
+// ---------------------------------------------------------------------------
+
+/**
+ * "I'm not claiming this deduction at all" (PRD FR-5, #88): settles `amount`
+ * and `substantiationRef` nil, plus (for the two rate-based methods)
+ * `businessKilometres`/`ratePerKm` or `hours`/`ratePerHour` — every field
+ * {@link import("@aus-tax-lodge/validation").collectInScopeFields} requires for
+ * that category, so the label is fully settled in one turn without asking
+ * about a claim the user isn't making. Only a definite `true` acts; `false` or
+ * `null` is a no-op — the claim itself is settled by the `amount` / rate /
+ * `recordsHeld` paths instead.
+ */
+function applyDeductionNotClaimed(
+  model: ReturnModel,
+  key: DeductionAmountKey,
+  notClaimed: boolean | null,
+): ReturnModel {
+  if (notClaimed !== true) return model;
+
+  let next = withDeductions(model, (d) => ({
+    ...d,
+    [key]: {
+      ...d[key],
+      amount: markNotApplicable(d[key].amount),
+      substantiationRef: markNotApplicable(d[key].substantiationRef),
+    },
+  }));
+
+  if (key === "workRelatedCar") {
+    next = withDeductions(next, (d) => ({
+      ...d,
+      workRelatedCar: {
+        ...d.workRelatedCar,
+        businessKilometres: markNotApplicable(d.workRelatedCar.businessKilometres),
+        ratePerKm: markNotApplicable(d.workRelatedCar.ratePerKm),
+      },
+    }));
+  } else if (key === "workFromHome") {
+    next = withDeductions(next, (d) => ({
+      ...d,
+      workFromHome: {
+        ...d.workFromHome,
+        hours: markNotApplicable(d.workFromHome.hours),
+        ratePerHour: markNotApplicable(d.workFromHome.ratePerHour),
+      },
+    }));
+  }
+
+  return next;
+}
+
+/** `substantiationRef` marker set when the user confirms they hold records (PRD FR-5). */
+export const RECORDS_HELD_MARKER = "records-held-confirmed-in-interview";
+/** `substantiationRef` marker set when the user acknowledges records are NOT held. */
+export const SUBSTANTIATION_REQUIRED_MARKER = "user-acknowledges-substantiation-required";
+
+/**
+ * "Do you hold the receipts / logbook / records to back up this claim?" (PRD
+ * FR-5, #88): settles `substantiationRef` with a marker string (mirroring how
+ * v1's review screen recorded a substantiation confirmation) and flags
+ * `unsubstantiated` when the answer is "no" — the claim still stands (the user
+ * has been warned), but the flag is there for `validateReturn` to surface later.
+ */
+function applyDeductionRecordsHeld(
+  model: ReturnModel,
+  key: DeductionAmountKey,
+  held: boolean | null,
+): ReturnModel {
+  if (held == null) {
+    throw new InterviewFieldError(
+      `deductions.${key}.recordsHeld needs a yes/no answer`,
+      `deductions.${key}.recordsHeld`,
+    );
+  }
+  const marker = held ? RECORDS_HELD_MARKER : SUBSTANTIATION_REQUIRED_MARKER;
+  return withDeductions(model, (d) => ({
+    ...d,
+    [key]: {
+      ...d[key],
+      substantiationRef: answer(d[key].substantiationRef, marker),
+      unsubstantiated: !held,
+    },
+  }));
 }

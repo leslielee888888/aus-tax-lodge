@@ -1,11 +1,7 @@
 import type { ReactNode } from "react";
 
 import { CheckIcon, MarkIcon, UserIcon } from "../icons";
-import type {
-  AssistantCard,
-  AssistantCardTurn,
-  ConversationTurn,
-} from "../../lib/conversation";
+import type { AssistantCard, AssistantCardTurn, ConversationTurn } from "../../lib/conversation";
 import { cardComponentFor } from "./cards/registry";
 import type { CardResult } from "./cards/types";
 
@@ -39,6 +35,7 @@ const CARD_LABELS: Record<AssistantCard["type"], string> = {
   reconcile: "Two sources disagree — which is right?",
   "review-summary": "Review your whole return",
   "out-of-scope": "This return can't continue here",
+  identity: "Your tax file number and refund account",
 };
 
 function Avatar({ who }: { who: "assistant" | "user" }) {
@@ -188,18 +185,32 @@ function CardTurnView({
   );
 }
 
+/**
+ * The neutral confirmation chip for a `card-response` turn (PRD FR-17, #88 /
+ * T15). `cardType` (looked up from the assistant card the response answers)
+ * picks the wording — `identity` gets its own "Details provided." rather than
+ * the generic line, since that response's payload is `{ provided: true }` and
+ * must never be paraphrased into anything that could look like it carries the
+ * TFN / account details. Every other card type keeps the existing generic text.
+ */
+function CardResponseBubble({ cardType }: { cardType: AssistantCard["type"] | undefined }) {
+  return <UserBubble text={cardType === "identity" ? "Details provided." : "Response recorded."} />;
+}
+
 function TurnView({
   turn,
   returnId,
   revision,
   readOnly,
   onCardResult,
+  cardTypeById,
 }: {
   turn: ConversationTurn;
   returnId: string;
   revision: number;
   readOnly: boolean;
   onCardResult: (result: CardResult) => void;
+  cardTypeById: ReadonlyMap<string, AssistantCard["type"]>;
 }) {
   if (turn.role === "assistant") {
     return turn.kind === "card" ? (
@@ -215,7 +226,9 @@ function TurnView({
     );
   }
   if (turn.kind === "file") return <FileChip filename={turn.filename} />;
-  if (turn.kind === "card-response") return <UserBubble text="Response recorded." />;
+  if (turn.kind === "card-response") {
+    return <CardResponseBubble cardType={cardTypeById.get(turn.cardId)} />;
+  }
   return <UserBubble text={turn.text} />;
 }
 
@@ -227,6 +240,13 @@ export function ChatTranscript({
   onCardResult,
   typing = false,
 }: ChatTranscriptProps) {
+  const cardTypeById = new Map<string, AssistantCard["type"]>();
+  for (const turn of turns) {
+    if (turn.role === "assistant" && turn.kind === "card") {
+      cardTypeById.set(turn.id, turn.card.type);
+    }
+  }
+
   return (
     <div
       role="log"
@@ -242,6 +262,7 @@ export function ChatTranscript({
           revision={revision}
           readOnly={readOnly}
           onCardResult={onCardResult}
+          cardTypeById={cardTypeById}
         />
       ))}
       {typing ? <TypingIndicator /> : null}
