@@ -2,7 +2,7 @@
 
 import { redirect } from "next/navigation";
 
-import type { ReturnModel } from "@aus-tax-lodge/model";
+import { answer, type ReturnModel } from "@aus-tax-lodge/model";
 
 import { resolveReconciliation } from "@aus-tax-lodge/extraction";
 import { buildLodgeInstructionsData } from "@aus-tax-lodge/export";
@@ -10,6 +10,12 @@ import { buildLodgeInstructionsData } from "@aus-tax-lodge/export";
 import { getClaudeClient } from "../../../lib/ai/client";
 import { classifyConversationFailure, type ConversationFailure } from "../../../lib/ai/failure";
 import { maybeRunningEstimate } from "../../../lib/estimate/running-estimate";
+import {
+  digitsOnly,
+  normalizeBsb,
+  validateIdentity,
+  type IdentityValues,
+} from "../../../lib/interview/identity";
 import {
   acknowledgeWarnings,
   readAcknowledgedWarningIds,
@@ -742,6 +748,63 @@ export async function resolveReconcile(
     kind: "card-response",
     cardId,
     response: { modelPath, chosenIndex },
+  });
+  return advanceInterview(returnId, expectedRevision, loaded, base, model);
+}
+
+// ---------------------------------------------------------------------------
+// Identity — TFN + refund bank account (PRD FR-1, FR-17, #88 / T15)
+// ---------------------------------------------------------------------------
+
+/**
+ * The secure `identity` card's submit (PRD FR-1, FR-17, #88 / T15): writes the
+ * TFN and refund bank account onto the model with `user-entered` provenance,
+ * then advances the interview exactly like any other card.
+ *
+ * The one rule this whole action exists to uphold: **the raw values never
+ * reach the conversation transcript.** `values` is applied straight to
+ * `model.taxpayer` and then discarded — only `{ provided: true }` is appended
+ * as the `user:card-response` turn, so `renderTranscript` (and therefore every
+ * later prompt) never carries the TFN or account number, and
+ * `ChatTranscript` never has anything to echo back either.
+ */
+export async function provideIdentity(
+  returnId: string,
+  expectedRevision: number,
+  cardId: string,
+  values: IdentityValues,
+): Promise<SendMessageResult> {
+  const gate = await loadForCard(returnId);
+  if ("error" in gate) return gate.error;
+  const { loaded } = gate;
+
+  const errors = validateIdentity(values);
+  if (Object.keys(errors).length > 0) {
+    return {
+      conversation: loaded.conversation,
+      revision: loaded.envelope.revision,
+      error: "Check the tax file number and bank account details and try again.",
+    };
+  }
+
+  const model: ReturnModel = {
+    ...loaded.model,
+    taxpayer: {
+      ...loaded.model.taxpayer,
+      taxFileNumber: answer(loaded.model.taxpayer.taxFileNumber, digitsOnly(values.tfn)),
+      refundAccount: answer(loaded.model.taxpayer.refundAccount, {
+        bsb: normalizeBsb(values.bsb),
+        accountNumber: digitsOnly(values.accountNumber),
+        accountName: values.accountName.trim(),
+      }),
+    },
+  };
+
+  const base = appendTurn(loaded.conversation, {
+    role: "user",
+    kind: "card-response",
+    cardId,
+    response: { provided: true },
   });
   return advanceInterview(returnId, expectedRevision, loaded, base, model);
 }

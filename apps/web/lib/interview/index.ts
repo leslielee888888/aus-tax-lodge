@@ -15,9 +15,14 @@ export type {
   InterviewStep,
 } from "./types";
 
-export { nextTurn, deterministicallyComplete, type NextTurnInput } from "./next-turn";
+export {
+  nextTurn,
+  deterministicallyComplete,
+  identityCardOutstanding,
+  type NextTurnInput,
+} from "./next-turn";
 export { applyUserTurn, type ApplyUserTurnInput } from "./apply-user-turn";
-export { topicsOutstanding, INTERVIEW_TOPIC_AREAS } from "./topics";
+export { topicsOutstanding, unsettledInScopeFieldHints, INTERVIEW_TOPIC_AREAS } from "./topics";
 export { renderModelForPrompt, renderTranscript } from "./render";
 export {
   INTERVIEW_FIELD_PATHS,

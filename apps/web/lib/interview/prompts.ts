@@ -14,7 +14,7 @@ import type { ConversationState } from "../conversation";
 import { readExtractionScratch } from "../extraction-scratch";
 import { INTERVIEW_FIELD_PATHS } from "./fields";
 import { renderModelForPrompt, renderTranscript } from "./render";
-import { INTERVIEW_TOPIC_AREAS, topicsOutstanding } from "./topics";
+import { INTERVIEW_TOPIC_AREAS, topicsOutstanding, unsettledInScopeFieldHints } from "./topics";
 import type { FieldUpdate, FieldUpdateKind } from "./types";
 
 export const NEXT_TURN_MAX_TOKENS = 400;
@@ -35,6 +35,10 @@ export const NEXT_TURN_SYSTEM = [
   "  deterministically by the app, not by you.",
   "- Completeness is decided by a deterministic gate, not by you. Say you are done only when",
   "  you genuinely believe every topic is covered; the app will re-check and overrule you.",
+  "- NEVER ask for the tax file number or the refund bank account (BSB / account number / account",
+  "  name) in chat. Those are collected only through a secure card the app raises itself once the",
+  "  taxpayer's name, date of birth and postal address are settled — do not ask for them, and do",
+  "  not try to map them onto a field yourself even if the user volunteers them unprompted.",
   "",
   "Reply with ONE JSON object, no prose, no code fence. One of:",
   '  {"kind":"ask","text":"<a single plain question>"}',
@@ -77,6 +81,7 @@ function reopenedLineHint(conversation: ConversationState): string | null {
 /** Build the per-turn prompt for {@link import("./next-turn").nextTurn}. */
 export function buildNextTurnPrompt(model: ReturnModel, conversation: ConversationState): string {
   const outstanding = topicsOutstanding(model);
+  const fieldHints = unsettledInScopeFieldHints(model);
   const unresolvedReconciliations = readExtractionScratch(model).pendingReconciliation;
   const reopened = reopenedLineHint(conversation);
   const rentalGateOutstanding =
@@ -94,6 +99,12 @@ export function buildNextTurnPrompt(model: ReturnModel, conversation: Conversati
     "",
     "STILL OUTSTANDING PER THE DETERMINISTIC CHECKLIST (may be incomplete — use judgement too):",
     outstanding.length > 0 ? outstanding.map((t) => `- ${t}`).join("\n") : "- (nothing flagged)",
+    "",
+    "ALSO STILL UNSETTLED PER THE EXPORT GATE'S FIELD-LEVEL CHECKLIST (finer-grained than the",
+    "list above — these must be settled, confirmed or explicitly marked not-applicable, before",
+    "the return can finish; a field mentioned here is never asked for via a secure card unless",
+    "this list says so):",
+    fieldHints.length > 0 ? fieldHints.map((t) => `- ${t}`).join("\n") : "- (nothing flagged)",
     "",
     "UNRESOLVED SOURCE DISAGREEMENTS (the app raises the reconcile card for these — do not ask about them yourself):",
     unresolvedReconciliations.length > 0
@@ -131,6 +142,14 @@ export const APPLY_TURN_SYSTEM = [
   "- If the reply is ambiguous, or spans several fields you cannot split confidently",
   "  (e.g. 'about two grand for tools and some union fees'), do NOT guess — ask to clarify.",
   "- Only use field paths from the ALLOWED PATHS list. Never invent one.",
+  "- For each deduction category (car, travel, clothing, self-education, other work-related,",
+  "  working from home, gifts/donations, managing tax affairs): a plain 'no' to claiming it at",
+  '  all maps to that category\'s "<category>.notClaimed": true — do not just leave it unanswered.',
+  '  A "yes, I have the receipts / logbook / records" for a claimed amount maps to that',
+  '  category\'s "<category>.recordsHeld": true; "no, I don\'t have them" maps to false (the claim',
+  "  still stands, but the user is being asked to acknowledge the substantiation gap).",
+  '- NEVER map anything onto "taxpayer.taxFileNumber" or "taxpayer.refundAccount" — those two',
+  "  paths do not exist on the allow-list precisely because they must never be typed in chat.",
   "- If the reply implies something out of scope for a simple resident return (capital gains /",
   "  selling shares or property, business or sole-trader income, foreign income, a trust /",
   "  partnership / managed-fund distribution, an employee share scheme, an employment",

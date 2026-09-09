@@ -1,5 +1,6 @@
 import type { CardRef } from "../../../lib/conversation";
 import { ConfirmFigureCard } from "./ConfirmFigureCard";
+import { IdentityCard } from "./IdentityCard";
 import { IncomeCheckpointCard } from "./IncomeCheckpointCard";
 import { OutOfScopeCard } from "./OutOfScopeCard";
 import { ReconcileCard } from "./ReconcileCard";
@@ -21,6 +22,7 @@ export const CARD_COMPONENTS: CardComponentMap = {
   reconcile: ReconcileCard,
   "out-of-scope": OutOfScopeCard,
   "review-summary": ReviewSummaryCard,
+  identity: IdentityCard,
 };
 
 export function cardComponentFor(type: CardRef): CardComponent | undefined {

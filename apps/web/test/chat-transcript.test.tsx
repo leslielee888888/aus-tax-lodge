@@ -99,6 +99,30 @@ describe("ChatTranscript (PRD FR-1, FR-12)", () => {
     expect(screen.getByText(/response recorded/i)).toBeTruthy();
   });
 
+  it("renders a response to the identity card as a neutral 'Details provided' chip, never echoing values (PRD FR-17, #88 / T15)", () => {
+    renderTranscript({
+      turns: [
+        turn({
+          id: "card1",
+          at: "t",
+          role: "assistant",
+          kind: "card",
+          card: { type: "identity", payload: {} },
+        }),
+        turn({
+          id: "resp1",
+          at: "t",
+          role: "user",
+          kind: "card-response",
+          cardId: "card1",
+          response: { provided: true },
+        }),
+      ],
+    });
+    expect(screen.getByText(/details provided/i)).toBeTruthy();
+    expect(screen.queryByText(/response recorded/i)).toBeNull();
+  });
+
   it("renders the registered drop-zone body for an upload-prefill card, not the placeholder", () => {
     const { container } = renderTranscript({
       turns: [

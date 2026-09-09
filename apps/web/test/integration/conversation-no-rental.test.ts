@@ -42,6 +42,8 @@ import { buildReturnJson, buildSourceIndex } from "@aus-tax-lodge/export";
 import { validateReturn, isExportBlocked } from "@aus-tax-lodge/validation";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
+import { deterministicallyComplete } from "../../lib/interview";
+
 const holder = vi.hoisted(() => ({ client: null as unknown }));
 vi.mock("../../lib/ai/client", () => ({
   getClaudeClient: () => {
@@ -61,6 +63,7 @@ import {
   readAesZip,
   send,
   setupTestEnv,
+  submitIdentity,
   type ClaudeScript,
   type TestEnv,
 } from "./harness";
@@ -124,24 +127,38 @@ describe("Scenario 1 — no-rental return, full conversational lifecycle", () =>
     expect(loaded.model.income.salaryWages[0]!.grossSalaryWages.status).toBe("confirmed");
     expect(loaded.model.income.dividends[0]!.frankingCredits.status).toBe("confirmed");
 
-    // --- Step 3: the interview asks for deductions + the FR-6 facts ----------
+    // --- Step 3: the interview asks for identity, deductions + the FR-6 facts (#88 / T15) ---
     const interestId = loaded.model.income.interestAccounts[0]!.id;
     const answerText =
-      "DEDUCTIONS+FACTS: work uniform $250, RSPCA donation $500, nothing else. " +
-      "I was an Australian resident all year, no spouse, no HELP loan, no private hospital cover, " +
-      "no dependent children, my CommBank account is all mine (100%), and my work-from-home hours " +
-      "were not also claimed as a separate expense. No government payments, fringe benefits or " +
-      "reportable employer super.";
+      "DEDUCTIONS+FACTS: I'm Priya Example, born 2/3/1985, at 1 Test St, Sydney NSW 2000. " +
+      "work uniform $250 (I have the receipts), RSPCA donation $500 (I have the receipt), nothing " +
+      "else — no car, travel, self-education, other work-related, working-from-home or tax-affairs " +
+      "deductions to claim. I was an Australian resident all year, no spouse, no HELP loan, no " +
+      "private hospital cover, no dependent children, my CommBank account is all mine (100%), and " +
+      "my work-from-home hours were not also claimed as a separate expense. No government payments, " +
+      "fringe benefits or reportable employer super.";
     const updates = [
+      // Taxpayer identity (PRD FR-1, #88 / T15) — name / DOB / postal address only;
+      // the TFN + refund account are NEVER part of a chat reply (PRD FR-17).
+      { path: "taxpayer.fullName", value: "Priya Example", kind: "string" },
+      { path: "taxpayer.dateOfBirth", value: "1985-03-02", kind: "date" },
+      { path: "taxpayer.postalAddress.line1", value: "1 Test St", kind: "string" },
+      { path: "taxpayer.postalAddress.suburb", value: "Sydney", kind: "string" },
+      { path: "taxpayer.postalAddress.state", value: "NSW", kind: "string" },
+      { path: "taxpayer.postalAddress.postcode", value: "2000", kind: "string" },
+      // Deductions claimed, with substantiation (#88 / T15).
       { path: "deductions.workRelatedClothing.amount", value: 250, kind: "number" },
+      { path: "deductions.workRelatedClothing.recordsHeld", value: true, kind: "boolean" },
       { path: "deductions.giftsAndDonations.amount", value: 500, kind: "number" },
-      { path: "deductions.workRelatedCar.amount", value: null, kind: "number" },
-      { path: "deductions.workRelatedTravel.amount", value: null, kind: "number" },
-      { path: "deductions.selfEducation.amount", value: null, kind: "number" },
-      { path: "deductions.otherWorkRelated.amount", value: null, kind: "number" },
-      { path: "deductions.workFromHome.amount", value: null, kind: "number" },
-      { path: "deductions.workFromHome.hours", value: null, kind: "number" },
-      { path: "deductions.costOfManagingTaxAffairs.amount", value: null, kind: "number" },
+      { path: "deductions.giftsAndDonations.recordsHeld", value: true, kind: "boolean" },
+      // Deductions NOT claimed at all (#88 / T15) — settles amount + substantiation
+      // (+ the car/WFH rate inputs) nil in one shot.
+      { path: "deductions.workRelatedCar.notClaimed", value: true, kind: "boolean" },
+      { path: "deductions.workRelatedTravel.notClaimed", value: true, kind: "boolean" },
+      { path: "deductions.selfEducation.notClaimed", value: true, kind: "boolean" },
+      { path: "deductions.otherWorkRelated.notClaimed", value: true, kind: "boolean" },
+      { path: "deductions.workFromHome.notClaimed", value: true, kind: "boolean" },
+      { path: "deductions.costOfManagingTaxAffairs.notClaimed", value: true, kind: "boolean" },
       { path: "questionnaire.residencyFullYear", value: true, kind: "boolean" },
       { path: "context.spouse.status", value: "none", kind: "string" },
       { path: "context.holdsStudyLoan", value: false, kind: "boolean" },
@@ -169,6 +186,34 @@ describe("Scenario 1 — no-rental return, full conversational lifecycle", () =>
     expect(sent.error).toBeUndefined();
 
     loaded = await load(returnId);
+    // The plain identity questions are settled, so the secure `identity` card is
+    // raised deterministically (PRD FR-1, FR-17, #88 / T15) — the interview does
+    // NOT go straight to review yet.
+    const identityCard = loaded.conversation.turns.at(-1)!;
+    expect(identityCard).toMatchObject({
+      role: "assistant",
+      kind: "card",
+      card: { type: "identity" },
+    });
+    expect(loaded.conversation.phase).toBe("interview");
+
+    // --- Step 3b: submit the TFN + refund account via the secure card --------
+    const identityResult = await submitIdentity(returnId, {
+      tfn: "123456782",
+      bsb: "062-000",
+      accountNumber: "12345678",
+      accountName: "Priya Example",
+    });
+    expect(identityResult.error).toBeUndefined();
+    // PRD FR-17 — the card-response turn carries only a flag, never the values.
+    const identityResponseTurn = identityResult.conversation.turns.find(
+      (t) => t.kind === "card-response" && t.cardId === identityCard.id,
+    );
+    expect(identityResponseTurn).toMatchObject({ response: { provided: true } });
+    expect(JSON.stringify(identityResponseTurn)).not.toContain("123456782");
+    expect(JSON.stringify(identityResponseTurn)).not.toContain("12345678");
+
+    loaded = await load(returnId);
     // The interview is complete → the conversation moved to review with the summary card.
     expect(loaded.conversation.phase).toBe("review");
     const reviewCard = loaded.conversation.turns.at(-1)!;
@@ -177,6 +222,10 @@ describe("Scenario 1 — no-rental return, full conversational lifecycle", () =>
       kind: "card",
       card: { type: "review-summary" },
     });
+
+    // --- #88 / T15 — the empty-seeded return is now genuinely complete -------
+    expect(deterministicallyComplete(loaded.model)).toBe(true);
+    expect(validateReturn(loaded.model).filter((i) => i.severity === "error")).toEqual([]);
 
     const model = loaded.model;
 

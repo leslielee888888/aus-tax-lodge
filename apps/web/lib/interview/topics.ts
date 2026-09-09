@@ -13,7 +13,8 @@
  * the real completeness decision is `isReadyForEstimate` + a clean
  * `validateReturn` (PRD FR-3).
  */
-import { requiredLabels, type ReturnModel } from "@aus-tax-lodge/model";
+import { isSettled, requiredLabels, type ReturnModel } from "@aus-tax-lodge/model";
+import { collectInScopeFields } from "@aus-tax-lodge/validation";
 
 /**
  * The static topic areas a simple resident return covers — given to Claude in
@@ -40,4 +41,71 @@ export function topicsOutstanding(model: ReturnModel): string[] {
   return requiredLabels(model)
     .filter((row) => !row.satisfied)
     .map((row) => row.name);
+}
+
+// ---------------------------------------------------------------------------
+// The `collectInScopeFields` supplementary hint (#88 / T15)
+// ---------------------------------------------------------------------------
+
+/**
+ * `collectInScopeFields` (`@aus-tax-lodge/validation`) is the export gate's
+ * own, more granular checklist — it requires the taxpayer identity block, the
+ * per-category deduction substantiation fields and (when present) the rental
+ * property identity, none of which {@link requiredLabels} tracks at the field
+ * level. Left alone, `topicsOutstanding` would report "nothing outstanding"
+ * while `collectInScopeFields` still had `unconfirmed-field` errors — so
+ * `nextTurn` would never see anything telling it to ask (PRD FR-3, #88 / T15).
+ *
+ * `taxpayer.taxFileNumber` / `taxpayer.refundAccount` are deliberately
+ * excluded: those two are raised by the deterministic `identity` card only,
+ * never by Claude asking in chat (PRD FR-17).
+ */
+const HINT_EXCLUDED_PATHS = new Set(["taxpayer.taxFileNumber", "taxpayer.refundAccount"]);
+
+interface HintRule {
+  readonly test: RegExp;
+  readonly hint: string;
+}
+
+const HINT_RULES: readonly HintRule[] = [
+  {
+    test: /^taxpayer\.(fullName|dateOfBirth|postalAddress)/,
+    hint: "The taxpayer's own details — full name, date of birth and postal address",
+  },
+  {
+    test: /^deductions\.workRelatedCar\./,
+    hint:
+      "Work-related car — whether it's claimed at all; if so, business kilometres, the " +
+      "cents-per-km rate being claimed, and whether records are held",
+  },
+  {
+    test: /^deductions\.workFromHome\./,
+    hint:
+      "Working from home (fixed-rate) — whether it's claimed at all; if so, hours, the " +
+      "fixed rate being claimed, and whether records are held",
+  },
+  {
+    test: /^deductions\.([a-zA-Z]+)\./,
+    hint: "One of the other deduction categories — whether it's claimed at all, and if so whether records are held",
+  },
+  {
+    test: /^rental\.property\./,
+    hint: "The rental property's own details — its address and the date it first earned income",
+  },
+];
+
+/**
+ * Every {@link collectInScopeFields} row not yet settled, reduced to short,
+ * de-duplicated, human-readable hints for the prompt (#88 / T15). Purely
+ * informational, like {@link topicsOutstanding} — the deterministic gate
+ * (`deterministicallyComplete`) is what actually decides completeness.
+ */
+export function unsettledInScopeFieldHints(model: ReturnModel): string[] {
+  const hints = new Set<string>();
+  for (const { path, field } of collectInScopeFields(model)) {
+    if (HINT_EXCLUDED_PATHS.has(path) || isSettled(field)) continue;
+    const rule = HINT_RULES.find((r) => r.test.test(path));
+    hints.add(rule ? rule.hint : path);
+  }
+  return [...hints];
 }

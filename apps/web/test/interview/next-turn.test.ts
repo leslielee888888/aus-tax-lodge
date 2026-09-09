@@ -6,7 +6,7 @@ import {
 } from "@aus-tax-lodge/model";
 import { describe, expect, it, vi } from "vitest";
 
-import { deterministicallyComplete, nextTurn } from "../../lib/interview";
+import { deterministicallyComplete, identityCardOutstanding, nextTurn } from "../../lib/interview";
 import type { InterviewClient } from "../../lib/interview";
 import { appendTurn, emptyConversation, type ConversationState } from "../../lib/conversation";
 import { withExtractionScratch } from "../../lib/extraction-scratch";
@@ -150,6 +150,35 @@ describe("nextTurn (PRD FR-3)", () => {
     await expect(
       nextTurn({ model: seededIncomeOnly(), conversation: CONVO, client }),
     ).rejects.toThrow(/unknown card type/i);
+  });
+
+  it("short-circuits to the identity card once name/DOB/address are settled but TFN/refund aren't (#88 / T15)", async () => {
+    const base = completeModel();
+    const model: ReturnModel = {
+      ...base,
+      taxpayer: {
+        ...base.taxpayer,
+        taxFileNumber: unsetField<string>(),
+        refundAccount: unsetField(),
+      },
+    };
+    expect(identityCardOutstanding(model)).toBe(true);
+
+    const { client, ask } = mockClient(JSON.stringify({ kind: "ask", text: "unused" }));
+    const step = await nextTurn({ model, conversation: CONVO, client });
+
+    expect(step).toEqual({ kind: "card", card: "identity" });
+    expect(ask).not.toHaveBeenCalled();
+  });
+
+  it("does NOT raise the identity card before name/DOB/address are settled", () => {
+    // A freshly-created return: nothing on `taxpayer` is settled yet, so the
+    // interview should ask the plain identity questions first (PRD FR-1).
+    expect(identityCardOutstanding(createEmptyReturnModel())).toBe(false);
+  });
+
+  it("stops raising the identity card once the TFN and refund account are both settled", () => {
+    expect(identityCardOutstanding(completeModel())).toBe(false);
   });
 
   it("short-circuits to a reconcile card when a source disagreement is unresolved (PRD FR-7)", async () => {

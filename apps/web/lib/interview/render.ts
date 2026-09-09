@@ -3,9 +3,11 @@
  *
  * {@link renderModelForPrompt} turns a {@link ReturnModel} into the short
  * "here is what the return already holds" block Claude is given each turn. It is
- * a pure function with no secrets: the TFN is **never** rendered (PRD FR-17,
- * "TFN masked / never in a prompt") — `taxpayer.taxFileNumber` is simply
- * omitted. T8's final review summary reuses this same function.
+ * a pure function with no secrets: the TFN and the refund bank account are
+ * **never** rendered (PRD FR-17, "TFN masked / never in a prompt") —
+ * `taxpayer.taxFileNumber` and `taxpayer.refundAccount` are simply omitted
+ * (only whether they are settled is mentioned, never their value). T8's final
+ * review summary reuses this same function.
  *
  * {@link renderTranscript} renders the last N conversation turns for context.
  */
@@ -43,6 +45,22 @@ export function renderModelForPrompt(model: ReturnModel): string {
   const lines: string[] = [];
   lines.push(`Return for the ${formatIncomeYear(model.targetYear)} income year.`);
 
+  // --- Taxpayer identity (PRD FR-1, FR-17) --------------------------------
+  // Deliberately omits `taxFileNumber` and `refundAccount` — those never
+  // appear in a prompt (PRD FR-17); the secure `identity` card handles them.
+  const t = model.taxpayer;
+  lines.push("", "TAXPAYER");
+  lines.push(`- Full name: ${t.fullName.value ?? "not yet answered"}`);
+  lines.push(`- Date of birth: ${t.dateOfBirth.value ?? "not yet answered"}`);
+  lines.push(
+    `- Postal address: ${t.postalAddress.value ? "on file" : "not yet answered"}` +
+      `; TFN + refund account: ${
+        isSettled(t.taxFileNumber) && isSettled(t.refundAccount)
+          ? "on file (secure card)"
+          : "not yet provided (raised via a secure card, never in chat)"
+      }`,
+  );
+
   // --- Income ------------------------------------------------------------
   lines.push("", "INCOME");
   if (model.income.salaryWages.length === 0) {
@@ -75,9 +93,15 @@ export function renderModelForPrompt(model: ReturnModel): string {
       })}`,
     );
   }
-  lines.push(`- Taxable government allowances: ${fig(model.income.governmentAllowances, { money: true })}`);
-  lines.push(`- Reportable fringe benefits: ${fig(model.income.reportableFringeBenefits, { money: true })}`);
-  lines.push(`- Reportable employer super: ${fig(model.income.reportableEmployerSuper, { money: true })}`);
+  lines.push(
+    `- Taxable government allowances: ${fig(model.income.governmentAllowances, { money: true })}`,
+  );
+  lines.push(
+    `- Reportable fringe benefits: ${fig(model.income.reportableFringeBenefits, { money: true })}`,
+  );
+  lines.push(
+    `- Reportable employer super: ${fig(model.income.reportableEmployerSuper, { money: true })}`,
+  );
 
   // --- Deductions ------------------------------------------------------
   lines.push("", "DEDUCTIONS");
@@ -92,12 +116,18 @@ export function renderModelForPrompt(model: ReturnModel): string {
       (d.workFromHome.hours.value != null ? `, ${d.workFromHome.hours.value} hours recorded` : ""),
   );
   lines.push(`- Gifts / donations to DGRs: ${fig(d.giftsAndDonations.amount, { money: true })}`);
-  lines.push(`- Cost of managing tax affairs: ${fig(d.costOfManagingTaxAffairs.amount, { money: true })}`);
+  lines.push(
+    `- Cost of managing tax affairs: ${fig(d.costOfManagingTaxAffairs.amount, { money: true })}`,
+  );
 
   // --- The FR-6 facts -------------------------------------------------
   lines.push("", "FACTS");
-  lines.push(`- Australian resident for the full year: ${yesNo(model.questionnaire.residencyFullYear)}`);
-  lines.push(`- Holds a study/training support (HELP) loan: ${yesNo(model.context.holdsStudyLoan)}`);
+  lines.push(
+    `- Australian resident for the full year: ${yesNo(model.questionnaire.residencyFullYear)}`,
+  );
+  lines.push(
+    `- Holds a study/training support (HELP) loan: ${yesNo(model.context.holdsStudyLoan)}`,
+  );
   lines.push(`- Days of private hospital cover: ${fig(model.context.privateHospitalCoverDays)}`);
   lines.push(`- Dependent children: ${fig(model.context.dependentChildren)}`);
   lines.push(
@@ -132,8 +162,17 @@ export function renderModelForPrompt(model: ReturnModel): string {
 
   // --- Rental --------------------------------------------------------
   if (model.rental.present) {
+    const p = model.rental.property;
     lines.push("", "RENTAL (present)");
-    lines.push(`- Property: ${model.rental.property.addressLine1.value ?? "address not given"}`);
+    lines.push(
+      `- Property address: ${p.addressLine1.value ?? "not yet answered"}` +
+        (p.suburb.value || p.state.value || p.postcode.value
+          ? ` ${[p.suburb.value, p.state.value, p.postcode.value].filter(Boolean).join(" ")}`
+          : ""),
+    );
+    lines.push(
+      `- Date the property first earned rental income: ${p.firstEarnedIncomeOn.value ?? "not yet answered"}`,
+    );
     lines.push(`- Gross rent: ${fig(model.rental.grossRent, { money: true })}`);
     lines.push("- Expense line items are gathered separately (see the rental topic).");
   } else {

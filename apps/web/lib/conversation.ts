@@ -37,7 +37,13 @@ export type CardRef =
   | "upload-or-tell"
   | "reconcile"
   | "review-summary"
-  | "out-of-scope";
+  | "out-of-scope"
+  /**
+   * The secure TFN + refund-bank-account card (PRD FR-1, FR-17, #88 / T15).
+   * Raised only deterministically ({@link import("./interview/next-turn")}),
+   * never by Claude — see `nextTurn`'s `CARD_REFS` list.
+   */
+  | "identity";
 
 export interface AssistantCard {
   readonly type: CardRef;
