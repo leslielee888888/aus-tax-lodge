@@ -1,6 +1,6 @@
 export {
-  buildVisionContent,
   CLAUDE_MODEL,
+  ClaudeAgentTurnError,
   createClaudeClient,
   type AskOptions,
   type ClaudeClient,

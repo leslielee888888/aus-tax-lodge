@@ -32,6 +32,15 @@ FROM node:20-bookworm-slim AS build
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=deps /app/node_modules ./node_modules
+# npm nests `@anthropic-ai/claude-agent-sdk` (T16) under packages/ai/node_modules
+# rather than hoisting it to the root — its peer dependency on `@anthropic-ai/sdk`
+# needs a newer version than apps/web's own `@anthropic-ai/sdk` pin, so npm keeps
+# a second, package-local copy. `.dockerignore` excludes all `node_modules` from
+# the build context, so `COPY . .` below does not bring this nested copy along —
+# without this line, `next build` fails outright with "Module not found:
+# Can't resolve '@anthropic-ai/claude-agent-sdk'" (confirmed with a real
+# `docker build` while verifying this task).
+COPY --from=deps /app/packages/ai/node_modules ./packages/ai/node_modules
 COPY . .
 RUN npm run build -w @aus-tax-lodge/web
 
@@ -56,6 +65,37 @@ RUN groupadd --system --gid 1001 nodejs \
 COPY --from=build /app/apps/web/.next/standalone ./
 COPY --from=build /app/apps/web/.next/static ./apps/web/.next/static
 COPY --from=build /app/apps/web/public ./apps/web/public
+
+# `@anthropic-ai/claude-agent-sdk` (T16) is NOT in the standalone copy above —
+# confirmed by inspecting a real build. Next's file tracer only follows static
+# imports; this package resolves its own on-disk location at *runtime* via
+# `createRequire(import.meta.url)` (it needs to find its sibling manifest.json
+# and load the right platform-specific CLI binary), which the tracer cannot
+# see. Worse, letting webpack bundle it inline (rather than keeping it a real
+# external `require`) bakes the *build container's* absolute path into the
+# compiled server chunk — verified in the `build` stage of this very image:
+# every reference resolves to the literal string
+# `file:///app/packages/ai/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs`.
+# Because both this stage and the `build` stage use `WORKDIR /app` with the
+# same repo-relative layout, recreating that exact path here is sufficient —
+# no code change needed, just make the file genuinely exist where the compiled
+# code expects it.
+#
+# Two pieces, both required:
+#  - the wrapper package itself (small; nested under packages/ai/node_modules
+#    because its `@anthropic-ai/sdk` peer dependency needs a newer version than
+#    apps/web's own pin — see the `build` stage comment above);
+#  - the actual Claude Code CLI binary, shipped as a separate ~200MB
+#    optionalDependency package selected by platform/arch at install time.
+#    `node:20-bookworm-slim` is glibc/linux-x64, so only that one variant is
+#    needed here (the build stage's `npm ci` also installs the musl variant,
+#    which this image does not use and does not copy). This is single-arch —
+#    `.github/workflows/release.yml` builds on `ubuntu-latest` with no
+#    `platforms:` override, i.e. linux/amd64 only; an arm64 or musl build of
+#    this image would need `claude-agent-sdk-linux-arm64` /
+#    `-linux-x64-musl` copied here instead.
+COPY --from=build /app/packages/ai/node_modules/@anthropic-ai/claude-agent-sdk ./packages/ai/node_modules/@anthropic-ai/claude-agent-sdk
+COPY --from=build /app/node_modules/@anthropic-ai/claude-agent-sdk-linux-x64 ./node_modules/@anthropic-ai/claude-agent-sdk-linux-x64
 
 USER nextjs
 EXPOSE 3000
