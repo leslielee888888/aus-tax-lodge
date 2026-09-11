@@ -113,6 +113,14 @@ Extract these fields:
 - privateHealth.oldestCoveredPersonAge — age at 30 June of the oldest person covered by the policy, if shown
 - privateHealth.coverDays — number of days of hospital/ancillary cover in the year, if shown
 
+If the statement lists MORE THAN ONE policy row or tax-claim-code line (this
+happens when the rebate tier changed partway through the year, or cover was
+split across periods) — sum every row's premiums into ONE total for
+privateHealth.premiumsEligibleForRebate, and every row's rebate received into
+ONE total for privateHealth.rebateReceived. Emit exactly one figure per field,
+never one per row — the return only has one slot for each and the engine
+apportions the yearly total across rebate periods itself.
+
 ${JSON_FORMAT_INSTRUCTION}`,
   pathAllowed: (path) =>
     pathSet(
@@ -184,7 +192,14 @@ Once each, if shown:
 - income.governmentAllowances — taxable Australian Government allowances (JobSeeker, Youth Allowance, Austudy)
 - income.reportableFringeBenefits — total reportable fringe benefits (label IT1)
 - income.reportableEmployerSuper — reportable employer super contributions (label IT2)
-- privateHealth.premiumsEligibleForRebate, privateHealth.rebateReceived, privateHealth.oldestCoveredPersonAge, privateHealth.coverDays — from any private health insurance policy details section
+- privateHealth.premiumsEligibleForRebate, privateHealth.rebateReceived, privateHealth.oldestCoveredPersonAge, privateHealth.coverDays — from any private health insurance policy details section. If that section lists more than one policy row or tax-claim-code line (the rebate tier can change partway through the year), sum every row's premiums into ONE total for privateHealth.premiumsEligibleForRebate and every row's rebate received into ONE total for privateHealth.rebateReceived — never one figure per row.
+- taxpayer.fullName — the taxpayer's own name, from the report's identity/heading section (never an employer or payer name)
+- taxpayer.dateOfBirth — the taxpayer's date of birth, as YYYY-MM-DD
+- taxpayer.postalAddress.line1, taxpayer.postalAddress.suburb, taxpayer.postalAddress.state, taxpayer.postalAddress.postcode — from the "Current postal address" line if shown, else the "Current residential address" line; split the one printed line into these parts. Only emit line2 if the address has a genuine second line (a unit/level or similar) — do not invent one.
+
+Do NOT extract the tax file number, any bank account or refund details, or
+spouse/dependant details, even if the report shows them — none of those are in
+the allowed-paths list below and must never be emitted.
 
 ${JSON_FORMAT_INSTRUCTION}`,
   pathAllowed: (path) =>
@@ -192,7 +207,10 @@ ${JSON_FORMAT_INSTRUCTION}`,
     pathSet(
       "income.governmentAllowances income.reportableFringeBenefits income.reportableEmployerSuper " +
         "privateHealth.premiumsEligibleForRebate privateHealth.rebateReceived " +
-        "privateHealth.oldestCoveredPersonAge privateHealth.coverDays",
+        "privateHealth.oldestCoveredPersonAge privateHealth.coverDays " +
+        "taxpayer.fullName taxpayer.dateOfBirth " +
+        "taxpayer.postalAddress.line1 taxpayer.postalAddress.line2 taxpayer.postalAddress.suburb " +
+        "taxpayer.postalAddress.state taxpayer.postalAddress.postcode",
     ).has(path),
 };
 

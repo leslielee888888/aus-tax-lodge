@@ -19,6 +19,7 @@ import {
   type DocumentOrigin,
   type EmployerIncome,
   type InterestAccount,
+  type PostalAddress,
   type ReturnModel,
 } from "@aus-tax-lodge/model";
 
@@ -70,6 +71,22 @@ const INCOME_SCALAR_FIELDS = [
 ] as const;
 type IncomeScalarField = (typeof INCOME_SCALAR_FIELDS)[number];
 
+/**
+ * Taxpayer identity fields a pre-fill report may carry (PRD FR-1, FR-2).
+ * Deliberately an exact, closed enumeration — `taxFileNumber` and
+ * `refundAccount` (bank details) are NEVER in this list and never will be:
+ * the TFN stays off every AI path entirely (masked in the UI, never added to
+ * a prompt, captured only through the dedicated `identity` card — PRD FR-17).
+ * Extending this enumeration to include either is a security regression, not
+ * a feature.
+ */
+const TAXPAYER_FIELDS = ["fullName", "dateOfBirth"] as const;
+type TaxpayerField = (typeof TAXPAYER_FIELDS)[number];
+
+/** The five `taxpayer.postalAddress.*` parts, merged onto one `Provenanced<PostalAddress>`. */
+const TAXPAYER_ADDRESS_FIELDS = ["line1", "line2", "suburb", "state", "postcode"] as const;
+type TaxpayerAddressField = (typeof TAXPAYER_ADDRESS_FIELDS)[number];
+
 const PRIVATE_HEALTH_FIELDS = [
   "premiumsEligibleForRebate",
   "rebateReceived",
@@ -108,6 +125,11 @@ const INCOME_SCALAR_PATH = /^income\.([a-zA-Z]+)$/;
 const PRIVATE_HEALTH_PATH = /^privateHealth\.([a-zA-Z]+)$/;
 const SUBSTANTIATED_PATH = /^deductions\.([a-zA-Z]+)\.([a-zA-Z]+)$/;
 const WFH_PATH = /^deductions\.workFromHome\.([a-zA-Z]+)$/;
+// Exact alternation, not a wildcard — see the TAXPAYER_FIELDS comment: this
+// can never accidentally match `taxpayer.taxFileNumber` or
+// `taxpayer.refundAccount`.
+const TAXPAYER_PATH = /^taxpayer\.(fullName|dateOfBirth)$/;
+const TAXPAYER_ADDRESS_PATH = /^taxpayer\.postalAddress\.(line1|line2|suburb|state|postcode)$/;
 
 function isSalaryWagesField(field: string): field is SalaryWagesField {
   return (SALARY_WAGES_FIELDS as readonly string[]).includes(field);
@@ -132,6 +154,12 @@ function isSubstantiatedField(field: string): field is SubstantiatedField {
 }
 function isWfhField(field: string): field is WfhField {
   return (WFH_FIELDS as readonly string[]).includes(field);
+}
+function isTaxpayerField(field: string): field is TaxpayerField {
+  return (TAXPAYER_FIELDS as readonly string[]).includes(field);
+}
+function isTaxpayerAddressField(field: string): field is TaxpayerAddressField {
+  return (TAXPAYER_ADDRESS_FIELDS as readonly string[]).includes(field);
 }
 
 /** The value type a known `modelPath` expects, or `null` if the path isn't recognised. */
@@ -172,6 +200,18 @@ export function expectedValueKind(modelPath: string): ModelPathValueKind | null 
       return SUBSTANTIATED_KIND[field];
     }
     return null;
+  }
+
+  const taxpayerMatch = TAXPAYER_PATH.exec(modelPath);
+  if (taxpayerMatch) {
+    const [, field] = taxpayerMatch as unknown as [string, string];
+    return isTaxpayerField(field) ? "string" : null;
+  }
+
+  const taxpayerAddressMatch = TAXPAYER_ADDRESS_PATH.exec(modelPath);
+  if (taxpayerAddressMatch) {
+    const [, field] = taxpayerAddressMatch as unknown as [string, string];
+    return isTaxpayerAddressField(field) ? "string" : null;
   }
 
   return null;
@@ -319,6 +359,56 @@ export function applyFigureToModel(
     };
   }
 
+  const taxpayerMatch = TAXPAYER_PATH.exec(modelPath);
+  if (taxpayerMatch) {
+    const [, field] = taxpayerMatch as unknown as [string, TaxpayerField];
+    return {
+      ...model,
+      taxpayer: {
+        ...model.taxpayer,
+        [field]: propose(model.taxpayer[field], value, origin),
+      },
+    };
+  }
+
+  const taxpayerAddressMatch = TAXPAYER_ADDRESS_PATH.exec(modelPath);
+  if (taxpayerAddressMatch) {
+    const [, field] = taxpayerAddressMatch as unknown as [string, TaxpayerAddressField];
+    return applyTaxpayerAddressPart(model, field, value as string, origin);
+  }
+
   // Unreachable: expectedValueKind already matched one of the branches above.
   throw new Error(`extraction: unhandled modelPath "${modelPath}"`);
+}
+
+/**
+ * Merges one `taxpayer.postalAddress.*` part onto the single
+ * `Provenanced<PostalAddress>` field, proposing the combined draft (the ATO
+ * pre-fill report is typically read in one extraction pass, so the parts
+ * arrive as several figures in the same run and accumulate here — mirrors
+ * `apps/web/lib/interview/fields.ts`'s `applyTaxpayerAddressPart` for the
+ * chat-answered equivalent, but always `propose()`s: a document figure is
+ * never a confirmed answer on its own).
+ */
+function applyTaxpayerAddressPart(
+  model: ReturnModel,
+  key: TaxpayerAddressField,
+  value: string,
+  origin: DocumentOrigin,
+): ReturnModel {
+  const field = model.taxpayer.postalAddress;
+  const existing = (field.value as Partial<PostalAddress> | null) ?? {};
+  const draft: PostalAddress = {
+    line1: existing.line1 ?? "",
+    line2: existing.line2 ?? "",
+    suburb: existing.suburb ?? "",
+    state: existing.state ?? "",
+    postcode: existing.postcode ?? "",
+    country: "Australia",
+    ...{ [key]: value },
+  };
+  return {
+    ...model,
+    taxpayer: { ...model.taxpayer, postalAddress: propose(field, draft, origin) },
+  };
 }
